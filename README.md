@@ -86,7 +86,7 @@ import subprocess
 EXE_PATH = r"Release\moezip.exe"
 
 # The target text to compress
-text_data = "Biography of Shah Rukh Khan Often referred to in the media as a Baadshah of Bollywood."
+text_data = "Hello there, compress this string."
 original_bytes = text_data.encode('utf-8')
 original_size = len(original_bytes)
 
