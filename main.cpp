@@ -1,3 +1,7 @@
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#endif
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -7,6 +11,7 @@
 #include <regex>
 #include <algorithm>
 #include <cstring>
+#include <cstdio>  // For std::fwrite
 
 #include "vocab.hpp"
 #include "tokenizer.hpp"
@@ -139,7 +144,7 @@ static Args parse_args(int argc, char* argv[]) {
         else if ((a == "-o" || a == "--output") && i+1 < argc) { args.output = argv[++i]; }
         else if (a == "--corpus" && i+1 < argc) { args.corpus = argv[++i]; }
         else if (a == "-q" || a == "--quiet") { args.quiet = true; }
-        else if (a[0] != '-') {
+        else if (a[0] != '-' || a == "-") {
             if (cmd == "hexdec") {
                 if (positional_count == 0) args.hex_data = a;
             } else {
@@ -195,7 +200,7 @@ static void cmd_compress(const Args& args) {
     double ratio = orig_bytes ? (double)comp_bytes / orig_bytes * 100.0 : 0.0;
 
     if (args.output == "-") {
-        std::cout << bytes_to_hex(packed) << "\n";
+        std::fwrite(packed.data(), 1, packed.size(), stdout);
     } else {
         std::string out_path = args.output;
         if (out_path.empty()) {
@@ -214,9 +219,9 @@ static void cmd_compress(const Args& args) {
     }
 
     if (!args.quiet) {
-        std::cout << "Original    : " << orig_bytes << " bytes\n";
-        std::cout << "Compressed  : " << comp_bytes << " bytes\n";
-        std::cout << "Ratio       : " << ratio      << "%\n";
+        std::cerr << "Original    : " << orig_bytes << " bytes\n";
+        std::cerr << "Compressed  : " << comp_bytes << " bytes\n";
+        std::cerr << "Ratio       : " << ratio      << "%\n";
     }
 }
 
@@ -248,7 +253,7 @@ static void cmd_decompress(const Args& args) {
                                                matrix, vd.expert_count, vd.expert_size);
 
     if (args.output == "-") {
-        std::cout << text;
+        std::fwrite(text.data(), 1, text.size(), stdout);
     } else {
         std::string out_path = args.output;
         if (out_path.empty()) {
@@ -280,7 +285,7 @@ static void cmd_hexdec(const Args& args) {
                                                matrix, vd.expert_count, vd.expert_size);
 
     if (args.output.empty() || args.output == "-") {
-        std::cout << text << "\n";
+        std::fwrite(text.data(), 1, text.size(), stdout);
     } else {
         std::ofstream fout(args.output);
         fout << text;
@@ -290,6 +295,10 @@ static void cmd_hexdec(const Args& args) {
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     try {
         Args args = parse_args(argc, argv);
 

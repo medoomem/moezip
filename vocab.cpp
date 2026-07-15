@@ -83,7 +83,7 @@ VocabData load_and_partition_wordlist(const std::string& filepath) {
     }
 
     int total_words = (int)raw_words.size();
-    std::cout << "Loaded " << total_words << " unique tokens (including N-Grams).\n";
+    std::cerr << "Loaded " << total_words << " unique tokens (including N-Grams).\n";
 
     std::unordered_set<std::string> priority_set;
     for (const auto& p : COMMON_PHRASES) priority_set.insert(p);
@@ -120,7 +120,7 @@ VocabData load_and_partition_wordlist(const std::string& filepath) {
     const int expert_count = 32;
     int expert_size = (total_words + expert_count - 1) / expert_count;
 
-    std::cout << "Experts: " << expert_count
+    std::cerr << "Experts: " << expert_count
               << " | Capacity/Exp: " << expert_size << "\n";
 
     int padded_size = expert_count * expert_size;

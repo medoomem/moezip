@@ -1,4 +1,12 @@
-"build/" 
-"*.exe" 
-"*.moe" 
-".DS_Store" 
+CMakeCache.txt
+CMakeFiles/
+*.cmake
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+Release/
+Debug/
+x64/
+.vs/
+*.moe
