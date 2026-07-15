@@ -9,7 +9,7 @@ Unlike standard dictionary-less compression algorithms that suffer from a "warm-
 
 ## Performance & Target Use Cases
 
-In standard benchmarks, `moezip` consistently reduces English text to **36%–51% of its original size** (a ~2.5x to 2.7x compression ratio). 
+In standard benchmarks, `moezip` consistently reduces English text to **36%–70% of its original size** (a ~1.43x to 2.78x compression ratio). 
 * A 57-byte string compresses down to 21 bytes.
 * A 16 KB document compresses down to 5.7 KB.
 
