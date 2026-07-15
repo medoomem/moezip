@@ -1,0 +1,4 @@
+"build/" 
+"*.exe" 
+"*.moe" 
+".DS_Store" 
