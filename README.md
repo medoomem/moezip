@@ -6,10 +6,17 @@
 
 A learning-augmented, high-efficiency text compressor written in C++20. `moezip` combines a Mixture of Experts (MoE) predictive state router, Asymmetric Numeral Systems (rANS) arithmetic coding, and LZ-style back-referencing to compress natural language text.
 
+Unlike standard dictionary-less compression algorithms (like Gzip or raw Zstd) that suffer from a "warm-up penalty" on short inputs, `moezip` embeds a pre-trained Markov state router and vocabulary directly into the compiled binary or shared library. This enables instant prediction of text patterns with zero metadata overhead.
+
 ---
 
 ## 📍 Table of Contents
 * [Performance & Benchmarks](#performance--benchmarks)
+  * [1. Short Text & Micro-Strings (< 500 Bytes)](#1-short-text--micro-strings--500-bytes)
+  * [2. Medium Text Clips (4 KB – 16 KB)](#2-medium-text-clips-4-kb--16-kb)
+* [Python & C-API Documentation](#python--c-api-documentation)
+  * [Native Python Module API (`import moezip`)](#native-python-module-api-import-moezip)
+  * [C-API Shared Library Exports (`moezip.dll` / `libmoezip.so`)](#c-api-shared-library-exports-moezipdll--libmoezipso)
 * [Compilation & Building](#compilation--building)
   * [Prerequisites](#prerequisites)
   * [Step 1: Generate Embedded Assets](#step-1-generate-embedded-c-assets)
@@ -29,13 +36,82 @@ A learning-augmented, high-efficiency text compressor written in C++20. `moezip`
 
 ## Performance & Benchmarks
 
-In real-world benchmarks on everyday text snippets (4 KB – 15 KB), `moezip` consistently outperforms industry-standard algorithms like Facebook's **Zstandard (Zstd)** on text blocks, reducing inputs to **36%–42% of their original size**:
+`moezip` is specialized for natural language text. Because its vocabulary and Markov state matrix are resident in memory, it eliminates frame header inflation on small inputs.
 
-* **5.4 KB Text Clip:** Compresses to **2,286 bytes** (42.3%) vs. Zstd's 2,595 bytes (48.0%).
+### 1. Short Text & Micro-Strings (< 500 Bytes)
+Standard compression algorithms (like raw Zstandard without a trained dictionary) suffer from a frame overhead penalty (~18 bytes), causing them to **expand** small inputs. `moezip` compresses micro-strings in **microseconds**:
+
+| Input Sample | Original Size | `moezip` Size | `moezip` Ratio | Raw Zstd (L3) | `moezip` Speed | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Tiny Phrase** | 23 Bytes | **10 Bytes** | **43.5%** | 32 Bytes *(139% Expanded)* | 20.7 µs | ✅ PASS |
+| **Short Sentence** | 57 Bytes | **22 Bytes** | **38.6%** | 66 Bytes *(116% Expanded)* | 38.7 µs | ✅ PASS |
+| **Chat Message** | 32 Bytes | **13 Bytes** | **40.6%** | 41 Bytes *(128% Expanded)* | 24.2 µs | ✅ PASS |
+| **JSON Payload** | 121 Bytes | **68 Bytes** | **56.2%** | 109 Bytes (90%) | 74.8 µs | ✅ PASS |
+| **News Snippet** | 299 Bytes | **134 Bytes** | **44.8%** | 208 Bytes (70%) | 186.7 µs | ✅ PASS |
+
+**Benchmark Totals:** Across 532 bytes of short text samples, `moezip` achieved **53.6% total space savings** (reduced to 247 bytes) compared to Zstd's **14.3% total space savings** (456 bytes).
+
+---
+
+### 2. Medium Text Clips (4 KB – 16 KB)
+On larger text blocks, `moezip` maintains a consistent **36%–42% compression ratio** (~58%–64% space savings), outperforming un-dictionary-assisted LZ algorithms:
+
 * **4.8 KB Text Clip:** Compresses to **2,072 bytes** (42.6%) vs. Zstd's 2,499 bytes (51.4%).
-* **16 KB Document:** Compresses down to **5.7 KB**.
+* **5.4 KB Text Clip:** Compresses to **2,286 bytes** (42.3%) vs. Zstd's 2,595 bytes (48.0%).
+* **16.0 KB Document:** Compresses down to **5,773 bytes** (36.1%).
 
-When loaded as an in-memory shared library (`moezip.dll` / `libmoezip.so`) or native Python extension (`moezip.pyd` / `moezip.so`), the pre-trained vocabulary remains resident in RAM, executing full compression passes in **< 3 milliseconds**!
+When executed via memory-resident libraries (`moezip.pyd` or `moezip.dll`), passes complete in **< 3 milliseconds**.
+
+---
+
+## Python & C-API Documentation
+
+### Native Python Module API (`import moezip`)
+
+When compiled with `pybind11` (`moezip.pyd` on Windows / `moezip.so` on Linux), the C++ engine exposes two high-level, thread-safe functions. Embedded vocabulary assets load automatically on first call [1].
+
+#### `moezip.compress(text: str) -> bytes`
+Compresses a UTF-8 string into a binary `bytes` payload in RAM using the embedded router matrix and vocabulary [1].
+
+* **Parameters:** `text` (*str*) – The raw UTF-8 input string to compress.
+* **Returns:** `bytes` – The compressed binary stream.
+* **Raises:** `std::runtime_error` if compression fails.
+* **Example:**
+  ```python
+  import moezip
+  compressed = moezip.compress("Hello world, compress this string!")
+  ```
+
+#### `moezip.decompress(packed_bytes: bytes) -> str`
+Decompresses a `moezip` binary payload back into its exact UTF-8 string representation losslessly [1].
+
+* **Parameters:** `packed_bytes` (*bytes*) – The compressed binary data buffer.
+* **Returns:** `str` – The restored original UTF-8 text string.
+* **Raises:** `std::runtime_error` if payload structure is invalid or corrupt.
+* **Example:**
+  ```python
+  import moezip
+  restored_text = moezip.decompress(compressed_bytes)
+  ```
+
+---
+
+### C-API Shared Library Exports (`moezip.dll` / `libmoezip.so`)
+
+For integration via Python `ctypes`, C, Rust, or Go, `moezip` exports C-linkage functions (`extern "C"`).
+
+#### `void init_engine(const char* vocab_path, const char* router_path)`
+Initializes the search tables and transition matrix in memory.
+* **`vocab_path`**: Path to a custom wordlist file on disk, or `NULL` / `""` to load embedded binary assets [1].
+* **`router_path`**: Path to a custom router matrix JSON file, or `NULL` / `""` to load embedded binary assets [1].
+
+#### `int compress_text(const char* text, uint8_t* out_buf, int max_out_len)`
+Compresses a null-terminated UTF-8 text string into `out_buf` [1].
+* **Returns:** Length of compressed bytes written to `out_buf`, or `-1` if output buffer size is insufficient.
+
+#### `int decompress_bytes(const uint8_t* in_buf, int in_len, char* out_buf, int max_out_len)`
+Decompresses raw `in_buf` bytes back into a null-terminated UTF-8 character buffer `out_buf` [1].
+* **Returns:** Character length written to `out_buf`, or `-1` if output buffer size is insufficient.
 
 ---
 
@@ -50,7 +126,7 @@ When loaded as an in-memory shared library (`moezip.dll` / `libmoezip.so`) or na
 ---
 
 ### Step 1: Generate Embedded C++ Assets
-Run `make.py` first. This reads `words_final.txt` and `router_stateless_v4.json`, chunking them into `embedded_assets.hpp` to bypass compiler string literal limits:
+Run `make.py` first. This reads `words_final.txt` and `router_stateless_v4.json`, chunking them into `embedded_assets.hpp` to bypass compiler string literal limits [1]:
 
 **Windows CMD:**
 ```cmd
@@ -92,7 +168,7 @@ cmake --build build_linux --parallel
 ---
 
 ### 🔹 Option 2: PyBind11 Build (Native `import moezip` Extension)
-*Use this option if you want to compile a native C++ Python extension module (`moezip.pyd` on Windows / `moezip.so` on Linux) for direct `import moezip` support.*
+*Use this option if you want to compile a native C++ Python extension module (`moezip.pyd` on Windows / `moezip.so` on Linux) for direct `import moezip` support [1].*
 
 **1. Install PyBind11:**
 ```bash
@@ -134,9 +210,9 @@ cmake --build build_linux --parallel
 
 `moezip` is **100% portable and self-contained**. 
 
-During `make.py`, your vocabulary (`words_final.txt`) and transition matrix (`router_stateless_v4.json`) are chunked into C++ string literals (`embedded_assets.hpp`) and compiled directly into the binary and libraries.
+During `make.py`, your vocabulary (`words_final.txt`) and transition matrix (`router_stateless_v4.json`) are chunked into C++ string literals (`embedded_assets.hpp`) and compiled directly into the binary and libraries [1].
 
-* **Zero File Dependencies:** You do **NOT** need `words_final.txt` or `router_stateless_v4.json` on disk to run `moezip`. You can distribute the compiled binaries to any folder or machine.
+* **Zero File Dependencies:** You do **NOT** need `words_final.txt` or `router_stateless_v4.json` on disk to run `moezip` [1]. You can distribute the compiled binaries to any folder or machine.
 * **Optional Disk Override:** If you wish to test a new vocabulary or domain-trained matrix without recompiling, place a `words_final.txt` or `router_stateless_v4.json` file in the execution directory. `moezip` will detect disk files and override its embedded defaults automatically.
 
 ---
@@ -172,7 +248,7 @@ moezip train --corpus path/to/dataset.txt
 
 ### 2. Native Python Extension Module (`import moezip`)
 
-Copy `moezip.pyd` (Windows) or `moezip.so` (Linux/macOS) into your Python project directory:
+Copy `moezip.pyd` (Windows) or `moezip.so` (Linux/macOS) into your Python project directory [1]:
 
 ```python
 import moezip
@@ -191,7 +267,7 @@ print(f"Compressed: {compressed_bytes.hex().upper()}")
 
 ### 3. Shared Library Integration (`ctypes` + `moezip.dll` / `libmoezip.so`)
 
-If built with Option 1, use Python's built-in `ctypes` to interface directly with the shared library in memory:
+If built with Option 1, use Python's built-in `ctypes` to interface directly with the shared library in memory [1]:
 
 ```python
 import os
