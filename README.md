@@ -46,31 +46,43 @@ Your compiled files will be located in `build/Release/`:
 * **`moezip.exe`** (Standalone Command Line Executable)
 * **`moezip.dll` / `libmoezip.so`** (Shared Library for C-API / Python Bindings)
 
----
+## Embedded Assets & Portability
+
+`moezip` is **100% portable and self-contained**. 
+
+During `python make.py`, your vocabulary (`words_final.txt`) and transition matrix (`router_stateless_v4.json`) are chunked into C++ string literals (`embedded_assets.hpp`) and compiled directly into `moezip.exe` and `moezip.dll`.
+
+### Zero File Dependencies
+You do **NOT** need `words_final.txt` or `router_stateless_v4.json` to run `moezip`. You can distribute `moezip.dll` or `moezip.exe` as a single standalone file to any folder or machine.
+
+### Optional Disk Override
+If you wish to test a new vocabulary or domain-trained matrix without recompiling the binary, simply place a `words_final.txt` or `router_stateless_v4.json` file in the execution directory. `moezip` will detect the disk files and override its embedded defaults. If no files are found on disk, it silently falls back to its embedded memory assets.
 
 ## Usage
 
 ### 1. Command Line Interface (CLI)
 
+*Note: On Windows CMD, run the executable as `build\Release\moezip.exe`. On Unix, use `./moezip`.*
+
 **Compress a text file:**
 ```bash
-moezip compress input.txt -o archive.moe
+build\Release\moezip.exe compress input.txt -o archive.moe
 ```
 
 **Decompress an archive:**
 ```bash
-moezip decompress archive.moe -o restored.txt
+build\Release\moezip.exe decompress archive.moe -o restored.txt
 ```
 
 **Decompress directly from a Hex String:**
 ```bash
-moezip hexdec 880A090A20202020... -o restored.txt
+build\Release\moezip.exe hexdec 880A090A20202020... -o restored.txt
 ```
 
 **Train a custom domain router matrix:**
-Optimize the compressor for specialized fields (e.g., medical, legal, or code) by feeding it a text corpus. This generates `router_stateless_v4.json`. Re-run `python make.py` and recompile to embed the new weights:
+Optimize the compressor for specialized fields (e.g., medical, legal, or code) by feeding it a text corpus. This generates a new `router_stateless_v4.json` file. Re-run `python make.py` and recompile to embed the new weights:
 ```bash
-moezip train --corpus path/to/dataset.txt
+build\Release\moezip.exe train --corpus path/to/dataset.txt
 ```
 
 ---
@@ -96,8 +108,9 @@ moezip.compress_text.restype = ctypes.c_int
 moezip.decompress_bytes.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
 moezip.decompress_bytes.restype = ctypes.c_int
 
-# 1. Pre-load vocabulary into RAM ONCE at app startup
-moezip.init_engine(b"words_final.txt", b"router_stateless_v4.json")
+# 1. Pre-load embedded vocabulary in RAM at app startup
+# We pass empty strings b"" to load the assets directly from DLL memory!
+moezip.init_engine(b"", b"")
 
 # 2. In-Memory Compression Function (Sub-millisecond speed)
 def compress(text: str) -> bytes:
