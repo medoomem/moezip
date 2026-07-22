@@ -82,6 +82,7 @@ PYBIND11_MODULE(moezip, m) {
     "api.cpp": """#include "vocab.hpp"
 #include "codec.hpp"
 #include "router.hpp"
+#include <cstdint>
 #include <cstring>
 #include <vector>
 #include <string>
@@ -957,6 +958,7 @@ TransitionMatrix load_router(const std::string& filepath, int expert_count) {
 """,
 
     "codec.hpp": """#pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -1623,7 +1625,7 @@ endif()
 add_executable(moezip main.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
 target_include_directories(moezip PRIVATE ${CMAKE_SOURCE_DIR})
 
-# 2. Shared Library (DLL)
+# 2. Shared Library (DLL / .so)
 add_library(moezip_dll SHARED api.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
 target_include_directories(moezip_dll PRIVATE ${CMAKE_SOURCE_DIR})
 set_target_properties(moezip_dll PROPERTIES OUTPUT_NAME "moezip")
@@ -1634,12 +1636,13 @@ if(pybind11_FOUND)
     pybind11_add_module(moezip_py bindings.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
     target_include_directories(moezip_py PRIVATE ${CMAKE_SOURCE_DIR})
     
-    # Forces CMake to name the output file strictly as "moezip.pyd"
-    set_target_properties(moezip_py PROPERTIES 
-        OUTPUT_NAME "moezip"
-        PREFIX ""
-        SUFFIX ".pyd"
-    )
+    # Set platform-correct extension (.pyd for Windows, .so for Linux/macOS)
+    if(WIN32)
+        set_target_properties(moezip_py PROPERTIES OUTPUT_NAME "moezip" PREFIX "" SUFFIX ".pyd")
+    else()
+        set_target_properties(moezip_py PROPERTIES OUTPUT_NAME "moezip" PREFIX "" SUFFIX ".so")
+    endif()
+    
     message(STATUS "pybind11 found: 'moezip' python module target enabled.")
 else()
     message(STATUS "pybind11 NOT found on system. Skipping python module target.")

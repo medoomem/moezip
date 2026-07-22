@@ -1,6 +1,7 @@
 #include "vocab.hpp"
 #include "codec.hpp"
 #include "router.hpp"
+#include <cstdint>
 #include <cstring>
 #include <vector>
 #include <string>
