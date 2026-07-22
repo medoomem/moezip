@@ -17,13 +17,11 @@ else()
   )
 endif()
 
-add_executable(moezip
-    main.cpp
-    vocab.cpp
-    tokenizer.cpp
-    ans.cpp
-    router.cpp
-    codec.cpp
-)
-
+# Executable CLI
+add_executable(moezip main.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
 target_include_directories(moezip PRIVATE ${CMAKE_SOURCE_DIR})
+
+# Shared Library (DLL)
+add_library(moezip_dll SHARED api.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
+target_include_directories(moezip_dll PRIVATE ${CMAKE_SOURCE_DIR})
+set_target_properties(moezip_dll PROPERTIES OUTPUT_NAME "moezip")
