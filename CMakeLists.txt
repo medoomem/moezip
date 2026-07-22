@@ -17,11 +17,28 @@ else()
   )
 endif()
 
-# Executable CLI
+# 1. Executable CLI
 add_executable(moezip main.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
 target_include_directories(moezip PRIVATE ${CMAKE_SOURCE_DIR})
 
-# Shared Library (DLL)
+# 2. Shared Library (DLL)
 add_library(moezip_dll SHARED api.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
 target_include_directories(moezip_dll PRIVATE ${CMAKE_SOURCE_DIR})
 set_target_properties(moezip_dll PROPERTIES OUTPUT_NAME "moezip")
+
+# 3. Optional PyBind11 Python Module
+find_package(pybind11 CONFIG QUIET)
+if(pybind11_FOUND)
+    pybind11_add_module(moezip_py bindings.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
+    target_include_directories(moezip_py PRIVATE ${CMAKE_SOURCE_DIR})
+    
+    # Forces CMake to name the output file strictly as "moezip.pyd"
+    set_target_properties(moezip_py PROPERTIES 
+        OUTPUT_NAME "moezip"
+        PREFIX ""
+        SUFFIX ".pyd"
+    )
+    message(STATUS "pybind11 found: 'moezip' python module target enabled.")
+else()
+    message(STATUS "pybind11 NOT found on system. Skipping python module target.")
+endif()

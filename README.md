@@ -7,6 +7,8 @@ A learning-augmented, high-efficiency text compressor written in C++20. `moezip`
 
 Unlike standard dictionary-less compression algorithms (like Gzip or raw Zstd) that suffer from a "warm-up penalty" on short inputs, `moezip` embeds a pre-trained Markov state router and vocabulary directly into the compiled binary or DLL. This enables instant prediction of text patterns with zero metadata overhead.
 
+---
+
 ## Performance & Benchmarks
 
 In real-world benchmarks on everyday text snippets (4 KB – 15 KB), `moezip` consistently outperforms industry-standard algorithms like Facebook's **Zstandard (Zstd)** on text blocks, reducing inputs to **36%–42% of their original size**:
@@ -15,48 +17,111 @@ In real-world benchmarks on everyday text snippets (4 KB – 15 KB), `moezip` co
 * **4.8 KB Text Clip:** Compresses to **2,072 bytes** (42.6%) vs. Zstd's 2,499 bytes (51.4%).
 * **16 KB Document:** Compresses down to **5.7 KB**.
 
-When loaded as an in-memory shared library (`moezip.dll`), the pre-trained vocabulary remains resident in RAM, executing full compression passes in **< 3 milliseconds**!
+When loaded as an in-memory shared library (`moezip.dll`) or native Python module (`moezip.pyd`), the pre-trained vocabulary remains resident in RAM, executing full compression passes in **< 3 milliseconds**!
 
-## Getting Started
+---
+
+## Compilation & Building
 
 ### Prerequisites
-* A C++20 compatible compiler (MSVC, GCC, or Clang)
+* A C++20 compatible compiler (MSVC on Windows, GCC 10+, or Clang 11+)
 * CMake (3.16 or higher)
-* Python 3.x (to generate embedded asset headers)
+* Python 3.x
+* `pybind11` (Optional, required only for native `import moezip` extension)
 
-### Build Instructions
+---
 
-First, run the included Python script. This parses your vocabulary and router state, chunking them into `embedded_assets.hpp` to bypass compiler string literal limits:
+### Step 1: Generate Embedded C++ Assets
+Run `make.py` first. This reads `words_final.txt` and `router_stateless_v4.json`, chunking them into `embedded_assets.hpp` to bypass compiler string literal limits:
 
 ```bash
 python make.py
 ```
 
-Then configure and compile both the standalone CLI executable (`moezip.exe`) and the shared library (`moezip.dll` / `libmoezip.so`):
+---
 
-```bash
-# Configure build directory
+### Step 2: Choose Your Compilation Method
+
+#### Method A: Standard CMake Build (Recommended)
+This compiles both the CLI executable (`moezip.exe`) and the C-API Shared Library (`moezip.dll` / `libmoezip.so`):
+
+**Windows (MSVC):**
+```cmd
 cmake -B build
-
-# Compile Release binaries
 cmake --build build --config Release
 ```
 
-Your compiled files will be located in `build/Release/`:
-* **`moezip.exe`** (Standalone Command Line Executable)
-* **`moezip.dll` / `libmoezip.so`** (Shared Library for C-API / Python Bindings)
+**Linux / macOS:**
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+Output directory: `build/Release/` (Windows) or `build/` (Linux/macOS).
+
+---
+
+#### Method B: Building with PyBind11 (`moezip.pyd` Python Extension)
+If you want to generate the native C++ Python module (`moezip.pyd` / `moezip.so`), install `pybind11` in Python first:
+
+```cmd
+pip install pybind11
+```
+
+**1. Automatic PyBind11 Path Detection (Windows CMD):**
+```cmd
+for /f "delims=" %i in ('python -c "import pybind11; print(pybind11.get_cmake_dir())"') do cmake -B build -Dpybind11_DIR="%i"
+cmake --build build --config Release
+```
+
+**2. Explicit PyBind11 Directory Passing:**
+If CMake cannot locate pybind11 automatically, pass the site-packages path directly:
+```cmd
+cmake -B build -Dpybind11_DIR="C:\Users\<YourUser>\AppData\Local\Programs\Python\Python311\Lib\site-packages\pybind11\share\cmake\pybind11"
+cmake --build build --config Release
+```
+
+Output files generated in `build/Release/`:
+* `moezip.exe` (CLI Executable)
+* `moezip.dll` (C-API Shared Library)
+* `moezip.pyd` (Native Python Extension Module)
+
+---
+
+#### Method C: Direct Compiler Commands (Without CMake)
+
+If you prefer building directly with native toolchains without CMake:
+
+**Windows MSVC (`cl.exe`):**
+```cmd
+:: Build CLI Executable
+cl /EHsc /O2 /std:c++20 main.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp /fe:moezip.exe
+
+:: Build C-API Shared Library (DLL)
+cl /EHsc /O2 /std:c++20 /LD api.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp /fe:moezip.dll
+```
+
+**Linux / macOS (`g++` / `clang++`):**
+```bash
+# Build CLI Executable
+g++ -O3 -std=c++20 -march=native main.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp -o moezip
+
+# Build Shared Library (.so)
+g++ -O3 -std=c++20 -fPIC -shared api.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp -o libmoezip.so
+```
+
+---
 
 ## Embedded Assets & Portability
 
 `moezip` is **100% portable and self-contained**. 
 
-During `python make.py`, your vocabulary (`words_final.txt`) and transition matrix (`router_stateless_v4.json`) are chunked into C++ string literals (`embedded_assets.hpp`) and compiled directly into `moezip.exe` and `moezip.dll`.
+During `python make.py`, your vocabulary (`words_final.txt`) and transition matrix (`router_stateless_v4.json`) are chunked into C++ string literals (`embedded_assets.hpp`) and compiled directly into `moezip.exe`, `moezip.dll`, and `moezip.pyd`.
 
-### Zero File Dependencies
-You do **NOT** need `words_final.txt` or `router_stateless_v4.json` to run `moezip`. You can distribute `moezip.dll` or `moezip.exe` as a single standalone file to any folder or machine.
+* **Zero File Dependencies:** You do **NOT** need `words_final.txt` or `router_stateless_v4.json` on disk to run `moezip`. You can distribute the compiled binaries to any folder or machine.
+* **Optional Disk Override:** If you wish to test a new vocabulary or domain-trained matrix without recompiling, place a `words_final.txt` or `router_stateless_v4.json` file in the execution directory. `moezip` will detect disk files and override its embedded defaults automatically.
 
-### Optional Disk Override
-If you wish to test a new vocabulary or domain-trained matrix without recompiling the binary, simply place a `words_final.txt` or `router_stateless_v4.json` file in the execution directory. `moezip` will detect the disk files and override its embedded defaults. If no files are found on disk, it silently falls back to its embedded memory assets.
+---
 
 ## Usage
 
@@ -87,11 +152,28 @@ build\Release\moezip.exe train --corpus path/to/dataset.txt
 
 ---
 
-### 2. High-Speed In-Memory Python Integration (`ctypes` + `moezip.dll`)
+### 2. Native Python Extension Module (`import moezip`)
 
-For maximum performance in Python (e.g., real-time clipboard managers, database row archivers, or API middleware), load `moezip.dll` directly using Python's built-in `ctypes`. 
+Copy the compiled `moezip.pyd` (Windows) or `moezip.so` (Unix) from `build/Release/` into your Python project directory. Import and use the compressor directly:
 
-This pre-loads the 63,000-word vocabulary into RAM **once on startup**, allowing subsequent compression calls to execute in **~1–3 milliseconds** without subprocess spawning overhead.
+```python
+import moezip
+
+# Compress directly in RAM (automatic embedded asset loading)
+compressed_bytes = moezip.compress("Hello world, compress this text!")
+
+# Decompress back to string
+original_text = moezip.decompress(compressed_bytes)
+
+print(f"Original  : '{original_text}'")
+print(f"Compressed: {compressed_bytes.hex().upper()}")
+```
+
+---
+
+### 3. Shared Library Integration (`ctypes` + `moezip.dll`)
+
+If you prefer dynamic loading without a `.pyd` module, use Python's built-in `ctypes` to interface directly with `moezip.dll`:
 
 ```python
 import os
@@ -108,11 +190,10 @@ moezip.compress_text.restype = ctypes.c_int
 moezip.decompress_bytes.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
 moezip.decompress_bytes.restype = ctypes.c_int
 
-# 1. Pre-load embedded vocabulary in RAM at app startup
-# We pass empty strings b"" to load the assets directly from DLL memory!
+# Pre-load embedded vocabulary in RAM at app startup (passing empty string loads from binary)
 moezip.init_engine(b"", b"")
 
-# 2. In-Memory Compression Function (Sub-millisecond speed)
+# In-Memory Compression Function
 def compress(text: str) -> bytes:
     raw_bytes = text.encode('utf-8')
     buf_size = len(raw_bytes) * 2 + 2048
@@ -121,29 +202,11 @@ def compress(text: str) -> bytes:
     comp_len = moezip.compress_text(raw_bytes, out_buf, buf_size)
     if comp_len <= 0: raise RuntimeError("Compression error")
     return bytes(out_buf[:comp_len])
-
-# 3. In-Memory Decompression Function
-def decompress(packed_bytes: bytes) -> str:
-    in_array = (ctypes.c_uint8 * len(packed_bytes)).from_buffer_copy(packed_bytes)
-    out_buf = ctypes.create_string_buffer(len(packed_bytes) * 10 + 4096)
-    
-    decomp_len = moezip.decompress_bytes(in_array, len(packed_bytes), out_buf, len(out_buf))
-    if decomp_len <= 0: raise RuntimeError("Decompression error")
-    return out_buf.value.decode('utf-8')
-
-# Example Usage
-original_text = "Here is a test string to compress in memory."
-compressed_bytes = compress(original_text)
-restored_text = decompress(compressed_bytes)
-
-print(f"Original Size   : {len(original_text.encode('utf-8'))} bytes")
-print(f"Compressed Size : {len(compressed_bytes)} bytes")
-print(f"Lossless Match  : {original_text == restored_text}")
 ```
 
 ---
 
-### 3. Piping & Subprocess Fallback (`stdin` / `stdout`)
+### 4. Piping & Subprocess Fallback (`stdin` / `stdout`)
 
 `moezip` supports standard I/O pipes. On Windows, standard streams are set to binary mode to prevent OS newline translation corruption (`0x0A` to `0x0D 0x0A`).
 
