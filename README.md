@@ -6,7 +6,24 @@
 
 A learning-augmented, high-efficiency text compressor written in C++20. `moezip` combines a Mixture of Experts (MoE) predictive state router, Asymmetric Numeral Systems (rANS) arithmetic coding, and LZ-style back-referencing to compress natural language text.
 
-Unlike standard dictionary-less compression algorithms (like Gzip or raw Zstd) that suffer from a "warm-up penalty" on short inputs, `moezip` embeds a pre-trained Markov state router and vocabulary directly into the compiled binary or shared library. This enables instant prediction of text patterns with zero metadata overhead.
+---
+
+## 📍 Table of Contents
+* [Performance & Benchmarks](#performance--benchmarks)
+* [Compilation & Building](#compilation--building)
+  * [Prerequisites](#prerequisites)
+  * [Step 1: Generate Embedded Assets](#step-1-generate-embedded-c-assets)
+  * [Step 2: Choose Compilation Path](#step-2-select-your-compilation-path)
+    * [Option 1: Standard Build (Zero Python Dependencies)](#-option-1-standard-build-zero-python-dependencies)
+    * [Option 2: PyBind11 Build (Native `import moezip` Extension)](#-option-2-pybind11-build-native-import-moezip-extension)
+* [Embedded Assets & Portability](#embedded-assets--portability)
+* [Usage](#usage)
+  * [1. Command Line Interface (CLI)](#1-command-line-interface-cli)
+  * [2. Native Python Extension Module (`import moezip`)](#2-native-python-extension-module-import-moezip)
+  * [3. Shared Library Integration (`ctypes`)](#3-shared-library-integration-ctypes--moezipdll--libmoezipso)
+  * [4. Piping & Subprocess Fallback (`stdin` / `stdout`)](#4-piping--subprocess-fallback-stdin--stdout)
+* [Contributing](#contributing)
+* [License](#license)
 
 ---
 
