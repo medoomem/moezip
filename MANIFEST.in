@@ -1,5 +1,6 @@
 include *.hpp
 include *.txt
 include *.json
+include *.pyi
 include README.md
 include LICENSE
