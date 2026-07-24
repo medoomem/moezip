@@ -45,7 +45,10 @@ jobs:
         run: python make.py
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: |
+          PYBIND_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR="$PYBIND_DIR"
 
       - name: Build C++ targets
         run: cmake --build build --config Release --parallel
@@ -74,7 +77,7 @@ jobs:
           path: '*.zip'
 
   # -------------------------------------------------------------------
-  # JOB 2: Build PyPI Wheels Natively (No QEMU Slowdown)
+  # JOB 2: Build PyPI Wheels across Python versions natively
   # -------------------------------------------------------------------
   build_wheels:
     name: Build PyPI wheels on ${{ matrix.os }} (${{ matrix.arch }})
