@@ -27,7 +27,7 @@ jobs:
             zip_name: moezip-linux-aarch64.zip
           - os: macos-latest
             zip_name: moezip-macos-arm64.zip
-          - os: macos-13
+          - os: macos-15-intel
             zip_name: moezip-macos-x64.zip
 
     steps:
@@ -93,7 +93,7 @@ jobs:
             arch: AMD64
           - os: macos-latest
             arch: arm64
-          - os: macos-13
+          - os: macos-15-intel
             arch: x86_64
 
     steps:
