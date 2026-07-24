@@ -89,4 +89,4 @@ For detailed test data and medium-clip benchmarks, see the **[Performance & Benc
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](https://github.com/medoomem/moezip/blob/main/LICENSE).
