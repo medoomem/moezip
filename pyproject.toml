@@ -5,12 +5,18 @@ build-backend = "setuptools.build_meta"
 [tool.cibuildwheel]
 # Build for Python 3.8 through 3.13
 build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
-
-# Skip legacy 32-bit archs
 skip = "*i686* *ppc64le* *s390x*"
 
-# Enable both Intel/AMD (x86_64) AND ARM64 (aarch64 for Pydroid 3 / Android / Raspberry Pi)
+# Linux Settings (Intel/AMD x86_64 + ARM64 aarch64 for Android / Pydroid 3 / Termux)
+[tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
-
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
+
+# macOS Settings (Intel x86_64 + Apple Silicon M1/M2/M3 arm64)
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+
+# Windows Settings
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]

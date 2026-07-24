@@ -1,10 +1,10 @@
 name: Build and Publish Multi-Platform Wheels to PyPI
 
 on:
-  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+  workflow_dispatch:
   push:
     tags:
-      - 'v*' # Triggers automatically when you push a tag like v1.0.2
+      - 'v*'
 
 jobs:
   build_wheels:
@@ -16,6 +16,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Set up QEMU emulator for ARM64 Linux builds (Pydroid 3 / Android / Raspberry Pi)
+      - name: Set up QEMU for ARM64
+        if: matrix.os == 'ubuntu-latest'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Set up Python
         uses: actions/setup-python@v5
