@@ -3,12 +3,14 @@ requires = ["setuptools>=61.0", "pybind11>=2.10.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.cibuildwheel]
-# Build wheels for Python 3.8 through 3.13
-build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+# Build for Python 3.8 through 3.13
+build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
 
-# Skip legacy 32-bit archs to ensure C++20 compiler compatibility
+# Skip legacy 32-bit archs
 skip = "*i686* *ppc64le* *s390x*"
 
-# Use modern Linux container image with GCC 11+ for C++20 support
+# Enable both Intel/AMD (x86_64) AND ARM64 (aarch64 for Pydroid 3 / Android / Raspberry Pi)
+archs = ["x86_64", "aarch64"]
+
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
