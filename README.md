@@ -1,5 +1,6 @@
 # moezip
 
+[![PyPI version](https://img.shields.io/pypi/v/moezip.svg)](https://pypi.org/project/moezip/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/C++-20-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://isocpp.org/)
@@ -10,12 +11,22 @@ Standard dictionary-less compressors (like raw Zstandard or Gzip) incur frame-he
 
 ---
 
+## Installation
+
+Install directly from [PyPI](https://pypi.org/project/moezip/):
+
+```bash
+pip install moezip
+```
+
+---
+
 ## Documentation
 
 Full technical documentation, build guides, and API specifications are hosted on the **[moezip GitHub Wiki](https://github.com/medoomem/moezip/wiki)**:
 
 * **[Architecture & Design](https://github.com/medoomem/moezip/wiki/Architecture-and-Design):** Internal pipeline, tokenization, 32x32 MoE router, and `make.py` string-literal generator.
-* **[Building & Compilation](https://github.com/medoomem/moezip/wiki/Building-and-Compilation):** CMake build guides for Windows (MSVC) and Linux (GCC/Clang).
+* **[Building & Compilation](https://github.com/medoomem/moezip/wiki/Building-and-Compilation):** CMake and PyPI build guides for Windows (MSVC) and Linux (GCC/Clang).
 * **[CLI Usage & Training](https://github.com/medoomem/moezip/wiki/CLI-Usage-and-Training):** Command reference, stream piping, and training domain-specific matrices.
 * **[API Reference](https://github.com/medoomem/moezip/wiki/API-Reference):** Documentation for Python (`import moezip`), C-API dynamic libraries, and native C++ headers.
 * **[Performance & Benchmarks](https://github.com/medoomem/moezip/wiki/Performance-and-Benchmarks):** Detailed space savings and speed metrics across micro-strings (< 500 B) and medium documents.
