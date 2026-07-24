@@ -7,16 +7,11 @@ build-backend = "setuptools.build_meta"
 build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
 skip = "*i686* *ppc64le* *s390x*"
 
-# Linux Settings (Intel/AMD x86_64 + ARM64 aarch64 for Android / Pydroid 3 / Termux)
+# Linux C++20 container images
 [tool.cibuildwheel.linux]
-archs = ["x86_64", "aarch64"]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 
-# macOS Settings (Intel x86_64 + Apple Silicon M1/M2/M3 arm64)
+# macOS C++20 deployment target
 [tool.cibuildwheel.macos]
-archs = ["x86_64", "arm64"]
-
-# Windows Settings
-[tool.cibuildwheel.windows]
-archs = ["AMD64"]
+environment = { MACOSX_DEPLOYMENT_TARGET = "10.15" }
