@@ -1,4 +1,4 @@
-name: Build and Publish Multi-Platform Wheels to PyPI
+name: Build Wheels & Publish GitHub Release Zips
 
 on:
   workflow_dispatch:
@@ -6,23 +6,95 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
-  build_wheels:
-    name: Build wheels on ${{ matrix.os }}
+  # -------------------------------------------------------------------
+  # JOB 1: Build Standalone Binary Release ZIPs (5 Platforms)
+  # -------------------------------------------------------------------
+  build_release_zips:
+    name: Build release ZIP on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            zip_name: moezip-windows-x64.zip
+          - os: ubuntu-latest
+            zip_name: moezip-linux-x86_64.zip
+          - os: ubuntu-24.04-arm
+            zip_name: moezip-linux-aarch64.zip
+          - os: macos-latest
+            zip_name: moezip-macos-arm64.zip
+          - os: macos-13
+            zip_name: moezip-macos-x64.zip
 
     steps:
       - uses: actions/checkout@v4
 
-      # Set up QEMU emulator for ARM64 Linux builds (Pydroid 3 / Android / Raspberry Pi)
-      - name: Set up QEMU for ARM64
-        if: matrix.os == 'ubuntu-latest'
-        uses: docker/setup-qemu-action@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          platforms: arm64
+          python-version: '3.11'
+
+      - name: Install PyBind11
+        run: python -m pip install pybind11
+
+      - name: Generate C++ assets
+        run: python make.py
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build C++ targets
+        run: cmake --build build --config Release --parallel
+
+      # Windows Packaging
+      - name: Package Windows ZIP
+        if: runner.os == 'Windows'
+        run: |
+          Compress-Archive -Path build/Release/moezip.exe, build/Release/moezip.dll, build/Release/moezip.pyd -DestinationPath ${{ matrix.zip_name }}
+
+      # Linux Packaging (x86_64 and aarch64)
+      - name: Package Linux ZIP
+        if: runner.os == 'Linux'
+        run: |
+          cd build && zip ../${{ matrix.zip_name }} moezip libmoezip.so moezip.so
+
+      # macOS Packaging (arm64 and x86_64)
+      - name: Package macOS ZIP
+        if: runner.os == 'macOS'
+        run: |
+          cd build && zip ../${{ matrix.zip_name }} moezip libmoezip.so moezip.so
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-zip-${{ matrix.zip_name }}
+          path: '*.zip'
+
+  # -------------------------------------------------------------------
+  # JOB 2: Build PyPI Wheels Natively (No QEMU Slowdown)
+  # -------------------------------------------------------------------
+  build_wheels:
+    name: Build PyPI wheels on ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+          - os: windows-latest
+            arch: AMD64
+          - os: macos-latest
+            arch: arm64
+          - os: macos-13
+            arch: x86_64
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,12 +106,17 @@ jobs:
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.os }}
+          name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
 
+  # -------------------------------------------------------------------
+  # JOB 3: Build Source Distribution (.tar.gz)
+  # -------------------------------------------------------------------
   build_sdist:
     name: Build source distribution (.tar.gz)
     runs-on: ubuntu-latest
@@ -62,10 +139,37 @@ jobs:
           name: cibw-sdist
           path: dist/*.tar.gz
 
+  # -------------------------------------------------------------------
+  # JOB 4: Create SINGLE GitHub Release with ALL 5 .zip files attached
+  # -------------------------------------------------------------------
+  publish_github_release:
+    name: Publish all 5 .zip files to GitHub Releases
+    needs: [build_release_zips]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-zip-*
+          path: release_zips
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_zips/*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # -------------------------------------------------------------------
+  # JOB 5: Publish wheels to PyPI
+  # -------------------------------------------------------------------
   upload_pypi:
-    name: Upload all wheels to PyPI
+    name: Upload wheels to PyPI
     needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/download-artifact@v4
         with:
