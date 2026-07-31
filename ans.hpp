@@ -5,12 +5,16 @@
 
 struct AdaptiveModel {
     std::vector<int> freqs;
-    std::vector<int> cumul;
+    std::vector<int> bit; // Fenwick Tree
+    int n;
     int total;
 
     explicit AdaptiveModel(int size);
     explicit AdaptiveModel(std::vector<int> init_freqs);
 
+    void _bit_add(int idx, int val);
+    int  _bit_sum(int idx) const;
+    
     void get_stats(int sym, int& out_cum, int& out_freq, int& out_total) const;
     void update(int sym);
     int find_symbol(int slot, int& out_cum, int& out_freq) const;

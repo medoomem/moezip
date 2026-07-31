@@ -2,65 +2,86 @@
 #include <algorithm>
 #include <stdexcept>
 
-// ─── AdaptiveModel ────────────────────────────────────────────────────────────
-
 AdaptiveModel::AdaptiveModel(int size) {
+    n = size;
     freqs.assign(size, 1);
+    bit.assign(n + 1, 0);
     total = size;
-    cumul.resize(size + 1);
-    for (int i = 0; i <= size; ++i) cumul[i] = i;
+    for (int i = 0; i < n; ++i) _bit_add(i, 1);
 }
 
-AdaptiveModel::AdaptiveModel(std::vector<int> init_freqs)
-    : freqs(std::move(init_freqs)) {
+AdaptiveModel::AdaptiveModel(std::vector<int> init_freqs) {
+    freqs = std::move(init_freqs);
+    n = freqs.size();
+    bit.assign(n + 1, 0);
     total = 0;
-    for (int f : freqs) total += f;
-    cumul.resize(freqs.size() + 1);
-    cumul[0] = 0;
-    for (size_t i = 0; i < freqs.size(); ++i)
-        cumul[i + 1] = cumul[i] + freqs[i];
+    for (int i = 0; i < n; ++i) {
+        total += freqs[i];
+        _bit_add(i, freqs[i]);
+    }
+}
+
+void AdaptiveModel::_bit_add(int idx, int val) {
+    idx += 1;
+    while (idx <= n) {
+        bit[idx] += val;
+        idx += idx & (-idx);
+    }
+}
+
+int AdaptiveModel::_bit_sum(int idx) const {
+    int res = 0;
+    while (idx > 0) {
+        res += bit[idx];
+        idx -= idx & (-idx);
+    }
+    return res;
 }
 
 void AdaptiveModel::get_stats(int sym, int& out_cum, int& out_freq, int& out_total) const {
-    out_cum   = cumul[sym];
-    out_freq  = freqs[sym];
+    out_cum = _bit_sum(sym);
+    out_freq = freqs[sym];
     out_total = total;
 }
 
 void AdaptiveModel::update(int sym) {
     freqs[sym]++;
     total++;
-    for (int i = sym + 1; i < (int)cumul.size(); ++i)
-        cumul[i]++;
+    _bit_add(sym, 1);
 
     if (total >= 16383) {
-        int cum = 0;
-        cumul[0] = 0;
-        for (size_t i = 0; i < freqs.size(); ++i) {
+        total = 0;
+        std::fill(bit.begin(), bit.end(), 0);
+        for (int i = 0; i < n; ++i) {
             freqs[i] = (freqs[i] >> 1) | 1;
-            cum += freqs[i];
-            cumul[i + 1] = cum;
+            total += freqs[i];
+            _bit_add(i, freqs[i]);
         }
-        total = cum;
     }
 }
 
 int AdaptiveModel::find_symbol(int slot, int& out_cum, int& out_freq) const {
-    int lo = 0, hi = (int)freqs.size() - 1;
-    while (lo < hi) {
-        int mid = (lo + hi) / 2;
-        if (cumul[mid + 1] <= slot) lo = mid + 1;
-        else hi = mid;
+    int idx = 0;
+    int bit_mask = 1;
+    while (bit_mask * 2 <= n) bit_mask *= 2;
+    
+    int curr_sum = 0;
+    while (bit_mask > 0) {
+        int next_idx = idx + bit_mask;
+        if (next_idx <= n && curr_sum + bit[next_idx] <= slot) {
+            idx = next_idx;
+            curr_sum += bit[next_idx];
+        }
+        bit_mask /= 2;
     }
-    if (cumul[lo] <= slot && slot < cumul[lo + 1]) {
-        out_cum  = cumul[lo];
-        out_freq = freqs[lo];
-        return lo;
+    
+    if (idx < n) {
+        out_cum = curr_sum;
+        out_freq = freqs[idx];
+        return idx;
     }
     throw std::runtime_error("ANS find_symbol: slot out of bounds");
 }
-
-// ─── ANSStream ────────────────────────────────────────────────────────────────
 
 void ANSStream::write_adaptive(AdaptiveModel& model, int sym) {
     ANSAction a;
@@ -79,11 +100,9 @@ void ANSStream::write_uniform(int val, int bits) {
     actions.push_back(a);
 }
 
-// ─── Zero-Overhead 32-Bit rANS ────────────────────────────────────────────────
-
 std::vector<uint8_t> ANSStream::finalize() {
     uint64_t X_MAX = 1ULL << 63;
-    uint64_t x = 1; // Start at 1 (Zero dummy bits) like BigInt
+    uint64_t x = 1; 
     std::vector<uint8_t> out;
 
     for (int k = (int)actions.size() - 1; k >= 0; --k) {
@@ -111,7 +130,6 @@ std::vector<uint8_t> ANSStream::finalize() {
         }
     }
 
-    // Exact variable length flush (removes 4 bytes of fixed padding)
     uint8_t x_bytes = 0;
     uint64_t temp = x;
     if (temp == 0) x_bytes = 1;
@@ -121,8 +139,7 @@ std::vector<uint8_t> ANSStream::finalize() {
         out.push_back((uint8_t)(x & 0xFF));
         x >>= 8;
     }
-    
-    out.push_back(x_bytes); // 1-byte length prefix to sync the hardware streams
+    out.push_back(x_bytes); 
 
     std::reverse(out.begin(), out.end());
     return out;
@@ -133,7 +150,6 @@ ANSDecoder::ANSDecoder(const std::vector<uint8_t>& payload) {
     ptr = 0;
     x = 0;
     
-    // Read precise variable state
     if (ptr < payload_data.size()) {
         uint8_t x_bytes = payload_data[ptr++];
         for (int i = 0; i < x_bytes; ++i) {
@@ -148,9 +164,7 @@ uint32_t ANSDecoder::read_word() {
     uint32_t w = 0;
     for (int i = 0; i < 4; ++i) {
         uint8_t byte = 0;
-        if (ptr < payload_data.size()) {
-            byte = payload_data[ptr++];
-        }
+        if (ptr < payload_data.size()) byte = payload_data[ptr++];
         w = (w << 8) | byte;
     }
     return w;
@@ -166,7 +180,7 @@ int ANSDecoder::read_adaptive(AdaptiveModel& model) {
 
     uint64_t L = 1ULL << 31;
     while (x < L) {
-        if (ptr >= payload_data.size()) break; // Safe break for zero-overhead EOF
+        if (ptr >= payload_data.size()) break; 
         x = (x << 32) | read_word();
     }
     return sym;
@@ -179,13 +193,11 @@ int ANSDecoder::read_uniform(int bits) {
 
     uint64_t L = 1ULL << 31;
     while (x < L) {
-        if (ptr >= payload_data.size()) break; // Safe break for zero-overhead EOF
+        if (ptr >= payload_data.size()) break;
         x = (x << 32) | read_word();
     }
     return val;
 }
-
-// ─── Number Encoding Helpers ──────────────────────────────────────────────────
 
 void get_number_parts(int val, int& out_bits, int& out_rem_bits, int& out_rem_val) {
     if (val == 0) { out_bits = 0; out_rem_bits = 0; out_rem_val = 0; return; }
@@ -219,7 +231,7 @@ std::vector<uint8_t> encode_varint(uint64_t val) {
 uint64_t decode_varint(const std::vector<uint8_t>& data, size_t& ptr) {
     uint64_t val = 0; int shift = 0;
     while (true) {
-        if (ptr >= data.size()) return val; // Safety bound
+        if (ptr >= data.size()) return val; 
         uint8_t b = data[ptr++];
         val |= ((uint64_t)(b & 0x7F)) << shift;
         if (!(b & 0x80)) break;

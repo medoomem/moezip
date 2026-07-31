@@ -7,9 +7,10 @@
 #include <cstring>
 #include <optional>
 #include <deque>
+#include <cmath>
+#include <iostream>
 
 struct MatchResult { int dist; int length; };
-
 using LZCache = std::unordered_map<std::string, std::deque<int>>;
 
 static std::optional<MatchResult>
@@ -92,7 +93,7 @@ std::vector<uint8_t> compress_adaptive_moe(
     const std::unordered_map<std::string, int>& vocab_to_idx,
     const TransitionMatrix& initial_matrix,
     int expert_count, int expert_size,
-    bool /*verbose*/) {
+    bool verbose) {
 
     auto [leading_ws, tokens] = tokenize(text, vocab_to_idx);
     if (tokens.empty() && leading_ws.empty()) return {};
@@ -110,10 +111,13 @@ std::vector<uint8_t> compress_adaptive_moe(
 
     ANSStream stream;
     TransitionMatrix transition_matrix = initial_matrix;
-    int prev_expert = 0;
+    int prev2_expert = 0;
+    int prev1_expert = 0;
     int i = 0;
+    
+    int stats_hits = 0, stats_misses = 0, stats_raw = 0, stats_lz = 0;
 
-    LZCache lz_cache; // Declared locally for thread safety and auto-destruction
+    LZCache lz_cache; 
 
     while (i < (int)tokens.size()) {
         auto match = find_best_token_match(tokens, i, lz_cache);
@@ -126,9 +130,11 @@ std::vector<uint8_t> compress_adaptive_moe(
             for (int k = 0; k < length; ++k) {
                 const auto& [w_curr, _] = tokens[i + k];
                 int ae = get_actual_expert(w_curr, vocab_to_idx, expert_size);
-                update_transition_matrix(prev_expert, ae, transition_matrix);
-                prev_expert = ae;
+                update_transition_matrix(prev2_expert, prev1_expert, ae, transition_matrix);
+                prev2_expert = prev1_expert;
+                prev1_expert = ae;
             }
+            stats_lz += length;
             i += length;
             continue;
         }
@@ -137,7 +143,7 @@ std::vector<uint8_t> compress_adaptive_moe(
         std::string w_lower = to_lower(w);
         bool has_casing = (to_lower(w) != to_upper(w));
         int casing = get_casing(w);
-        int predicted_expert = predict_next_expert(prev_expert, transition_matrix);
+        int predicted_expert = predict_next_expert(prev2_expert, prev1_expert, transition_matrix);
 
         auto vit = vocab_to_idx.find(w_lower);
         if (vit != vocab_to_idx.end() && casing != -1) {
@@ -149,15 +155,18 @@ std::vector<uint8_t> compress_adaptive_moe(
                 stream.write_adaptive(tag_model, 0);
                 write_number(stream, local_idx, local_idx_bits);
                 if (has_casing) stream.write_adaptive(casing_model, casing);
+                stats_hits++;
             } else {
                 stream.write_adaptive(tag_model, 1);
                 stream.write_adaptive(expert_model, actual_expert);
                 write_number(stream, local_idx, local_idx_bits);
                 if (has_casing) stream.write_adaptive(casing_model, casing);
+                stats_misses++;
             }
 
-            update_transition_matrix(prev_expert, actual_expert, transition_matrix);
-            prev_expert = actual_expert;
+            update_transition_matrix(prev2_expert, prev1_expert, actual_expert, transition_matrix);
+            prev2_expert = prev1_expert;
+            prev1_expert = actual_expert;
             write_spacing(stream, spacing, spacing_model, char_len_bits, char_model);
             ++i;
             continue;
@@ -169,10 +178,21 @@ std::vector<uint8_t> compress_adaptive_moe(
         for (size_t b = 0; b < w.size(); ++b)
             stream.write_adaptive(char_model, wb[b]);
 
-        update_transition_matrix(prev_expert, 31, transition_matrix);
-        prev_expert = 31;
+        update_transition_matrix(prev2_expert, prev1_expert, 31, transition_matrix);
+        prev2_expert = prev1_expert;
+        prev1_expert = 31;
         write_spacing(stream, spacing, spacing_model, char_len_bits, char_model);
+        stats_raw++;
         ++i;
+    }
+
+    if (verbose) {
+        double bits_per_expert = std::log2(expert_count);
+        std::cout << "\n  [Routing Stats]\n";
+        std::cout << "  Hits (Tag 0)      : " << stats_hits << "  (Gave/Saved ~" << stats_hits * bits_per_expert << " bits)\n";
+        std::cout << "  Misses (Tag 1)    : " << stats_misses << "  (Took/Cost  ~" << stats_misses * bits_per_expert << " bits)\n";
+        std::cout << "  Raw Fallback (T2) : " << stats_raw << "\n";
+        std::cout << "  LZ Copied (Tag 3) : " << stats_lz << " tokens\n";
     }
 
     std::vector<uint8_t> ans_payload = stream.finalize();
@@ -217,19 +237,18 @@ std::string decompress_adaptive_moe(
     AdaptiveModel char_model(256);
 
     AdaptiveModel local_idx_bits({1,1,2,4,8,16,32,64,128,64,32,16,8,4,2,1});
-    // Must mirror compress_adaptive_moe exactly -- same model sizes in the
-    // same order -- or the adaptive state will desync and decoding breaks.
     AdaptiveModel dist_bits(32);
     AdaptiveModel len_bits(32);
     AdaptiveModel char_len_bits({1,2,4,8,16,32,64,32,16,8,4,2,1,1,1,1});
 
     TransitionMatrix transition_matrix = initial_matrix;
-    int prev_expert = 0;
+    int prev2_expert = 0;
+    int prev1_expert = 0;
     std::vector<Token> decoded_tokens;
     decoded_tokens.reserve(word_count);
 
     while ((int)decoded_tokens.size() < word_count) {
-        int predicted_expert = predict_next_expert(prev_expert, transition_matrix);
+        int predicted_expert = predict_next_expert(prev2_expert, prev1_expert, transition_matrix);
         int tag = stream.read_adaptive(tag_model);
 
         if (tag == 0) {
@@ -247,8 +266,9 @@ std::string decompress_adaptive_moe(
 
             std::string spacing = read_spacing(stream, spacing_model,
                                                char_len_bits, char_model);
-            update_transition_matrix(prev_expert, predicted_expert, transition_matrix);
-            prev_expert = predicted_expert;
+            update_transition_matrix(prev2_expert, prev1_expert, predicted_expert, transition_matrix);
+            prev2_expert = prev1_expert;
+            prev1_expert = predicted_expert;
             decoded_tokens.push_back({word, spacing});
 
         } else if (tag == 1) {
@@ -267,8 +287,9 @@ std::string decompress_adaptive_moe(
 
             std::string spacing = read_spacing(stream, spacing_model,
                                                char_len_bits, char_model);
-            update_transition_matrix(prev_expert, actual_expert, transition_matrix);
-            prev_expert = actual_expert;
+            update_transition_matrix(prev2_expert, prev1_expert, actual_expert, transition_matrix);
+            prev2_expert = prev1_expert;
+            prev1_expert = actual_expert;
             decoded_tokens.push_back({word, spacing});
 
         } else if (tag == 2) {
@@ -279,8 +300,9 @@ std::string decompress_adaptive_moe(
             std::string word(reinterpret_cast<const char*>(bts.data()), length);
             std::string spacing = read_spacing(stream, spacing_model,
                                                char_len_bits, char_model);
-            update_transition_matrix(prev_expert, 31, transition_matrix);
-            prev_expert = 31;
+            update_transition_matrix(prev2_expert, prev1_expert, 31, transition_matrix);
+            prev2_expert = prev1_expert;
+            prev1_expert = 31;
             decoded_tokens.push_back({word, spacing});
 
         } else if (tag == 3) {
@@ -291,8 +313,9 @@ std::string decompress_adaptive_moe(
             for (int k = 0; k < length; ++k) {
                 const Token& copied = decoded_tokens[start_idx + k];
                 int ae = get_actual_expert(copied.first, vocab_to_idx, expert_size);
-                update_transition_matrix(prev_expert, ae, transition_matrix);
-                prev_expert = ae;
+                update_transition_matrix(prev2_expert, prev1_expert, ae, transition_matrix);
+                prev2_expert = prev1_expert;
+                prev1_expert = ae;
                 decoded_tokens.push_back(copied);
             }
         }

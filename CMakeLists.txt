@@ -32,7 +32,6 @@ if(pybind11_FOUND)
     pybind11_add_module(moezip_py bindings.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
     target_include_directories(moezip_py PRIVATE ${CMAKE_SOURCE_DIR})
     
-    # Set platform-correct extension (.pyd for Windows, .so for Linux/macOS)
     if(WIN32)
         set_target_properties(moezip_py PROPERTIES OUTPUT_NAME "moezip" PREFIX "" SUFFIX ".pyd")
     else()

@@ -6,16 +6,22 @@
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 
 static std::string matrix_to_json(const TransitionMatrix& m) {
     std::ostringstream oss;
     oss << "[";
-    for (size_t r = 0; r < m.size(); ++r) {
-        if (r > 0) oss << ",";
+    for (size_t i = 0; i < m.size(); ++i) {
+        if (i > 0) oss << ",";
         oss << "[";
-        for (size_t c = 0; c < m[r].size(); ++c) {
-            if (c > 0) oss << ",";
-            oss << m[r][c];
+        for (size_t j = 0; j < m[i].size(); ++j) {
+            if (j > 0) oss << ",";
+            oss << "[";
+            for (size_t k = 0; k < m[i][j].size(); ++k) {
+                if (k > 0) oss << ",";
+                oss << m[i][j][k];
+            }
+            oss << "]";
         }
         oss << "]";
     }
@@ -25,25 +31,25 @@ static std::string matrix_to_json(const TransitionMatrix& m) {
 
 static TransitionMatrix json_to_matrix(const std::string& json) {
     TransitionMatrix result;
+    std::vector<std::vector<int>> current_2d;
     std::vector<int> current_row;
-    bool in_inner = false;
+    int depth = 0;
     size_t i = 0;
     while (i < json.size()) {
         char c = json[i];
         if (c == '[') {
-            if (in_inner) {
-                current_row.clear();
-            } else {
-                in_inner = (i > 0 && json[i-1] != 0);
-            }
-            in_inner = true;
+            depth++;
+            if (depth == 3) current_row.clear();
             ++i;
         } else if (c == ']') {
-            if (!current_row.empty()) {
-                result.push_back(current_row);
+            if (depth == 3) {
+                current_2d.push_back(current_row);
                 current_row.clear();
-                in_inner = false;
+            } else if (depth == 2) {
+                result.push_back(current_2d);
+                current_2d.clear();
             }
+            depth--;
             ++i;
         } else if (std::isdigit((unsigned char)c) || (c == '-' && i + 1 < json.size() && std::isdigit((unsigned char)json[i+1]))) {
             size_t end = i;
@@ -58,22 +64,22 @@ static TransitionMatrix json_to_matrix(const std::string& json) {
     return result;
 }
 
-int predict_next_expert(int prev_expert, const TransitionMatrix& matrix) {
-    const auto& row = matrix[prev_expert];
+int predict_next_expert(int prev2, int prev1, const TransitionMatrix& matrix) {
+    const auto& row = matrix[prev2][prev1];
     int max_val = *std::max_element(row.begin(), row.end());
-    if (row[prev_expert] == max_val) return prev_expert;
+    if (row[prev1] == max_val) return prev1;
     for (int i = 0; i < (int)row.size(); ++i)
         if (row[i] == max_val) return i;
-    return prev_expert;
+    return prev1;
 }
 
-void update_transition_matrix(int prev_expert, int actual_expert, TransitionMatrix& matrix) {
-    auto& row = matrix[prev_expert];
+void update_transition_matrix(int prev2, int prev1, int actual_expert, TransitionMatrix& matrix) {
+    auto& row = matrix[prev2][prev1];
     row[actual_expert]++;
     int s = 0;
     for (int v : row) s += v;
-    if (s > 128) {
-        for (int& v : row) v = std::max(1, v / 2);
+    if (s > 1024) {
+        for (int& v : row) v = std::max(1, (int)(v * 0.9));
     }
 }
 
@@ -83,15 +89,17 @@ TransitionMatrix train_router_on_corpus(
     int expert_count, int expert_size,
     const std::string& output_filepath) {
 
-    std::cout << "--- ROUTER TRAINING PHASE STARTED ---\n";
-    TransitionMatrix matrix(expert_count, std::vector<int>(expert_count, 1));
-    int prev_expert = 0;
+    std::cout << "--- ROUTER TRAINING PHASE STARTED (2nd-Order Markov) ---\n";
+    TransitionMatrix matrix(expert_count, std::vector<std::vector<int>>(expert_count, std::vector<int>(expert_count, 1)));
+    int prev2_expert = 0;
+    int prev1_expert = 0;
 
     auto [lws, tokens] = tokenize(corpus_text, vocab_to_idx);
     for (const auto& [w, _] : tokens) {
         int actual = get_actual_expert(w, vocab_to_idx, expert_size);
-        update_transition_matrix(prev_expert, actual, matrix);
-        prev_expert = actual;
+        update_transition_matrix(prev2_expert, prev1_expert, actual, matrix);
+        prev2_expert = prev1_expert;
+        prev1_expert = actual;
     }
 
     save_router(matrix, output_filepath);

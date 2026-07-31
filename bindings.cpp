@@ -15,7 +15,6 @@ static VocabData g_vd;
 static TransitionMatrix g_matrix;
 static bool g_initialized = false;
 
-// Helper RAII class to temporarily suppress std::cerr console messages
 struct SilenceStderr {
     std::streambuf* old_buf;
     std::stringstream null_buf;
@@ -25,7 +24,7 @@ struct SilenceStderr {
 
 static void py_init(const std::string& vocab_path = "", const std::string& router_path = "", bool quiet = true) {
     if (quiet) {
-        SilenceStderr silence; // Redirect std::cerr during asset loading
+        SilenceStderr silence; 
         g_vd = load_and_partition_wordlist(vocab_path);
         g_matrix = load_router(router_path, g_vd.expert_count);
     } else {
@@ -37,13 +36,13 @@ static void py_init(const std::string& vocab_path = "", const std::string& route
 
 static void ensure_initialized() {
     if (!g_initialized) {
-        py_init("", "", true); // Default quiet auto-initialization
+        py_init("", "", true); 
     }
 }
 
 static py::bytes py_compress(const std::string& text) {
     ensure_initialized();
-    auto packed = compress_adaptive_moe(text, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size);
+    auto packed = compress_adaptive_moe(text, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size, false);
     return py::bytes(reinterpret_cast<const char*>(packed.data()), packed.size());
 }
 
@@ -53,7 +52,7 @@ static std::string py_decompress(const std::string& packed_bytes) {
     return decompress_adaptive_moe(vec, g_vd.vocab, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size);
 }
 
-static void py_train(const std::string& corpus_or_path, const std::string& output_filepath = "router_stateless_v4.json", bool quiet = false) {
+static void py_train(const std::string& corpus_or_path, const std::string& output_filepath = "router_stateless_v5_2nd_order.json", bool quiet = false) {
     ensure_initialized();
 
     std::string corpus_text;
@@ -90,7 +89,7 @@ PYBIND11_MODULE(moezip, m) {
 
     m.def("train", &py_train, 
           py::arg("corpus_or_path"), 
-          py::arg("output_filepath") = "router_stateless_v4.json", 
+          py::arg("output_filepath") = "router_stateless_v5_2nd_order.json", 
           py::arg("quiet") = false,
           "Trains the router state matrix on a text string or corpus file.");
 }

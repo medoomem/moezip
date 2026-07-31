@@ -2,6 +2,8 @@
 #include <regex>
 #include <algorithm>
 #include <cctype>
+#include <vector>
+#include <climits>
 
 std::string to_lower(const std::string& s) {
     std::string r = s;
@@ -32,8 +34,6 @@ std::string to_title(const std::string& s) {
     }
     return r;
 }
-
-// ... [Remainder of tokenizer.cpp remains unchanged] ...
 
 bool is_all_nonword(const std::string& s) {
     if (s.empty()) return false;
@@ -136,24 +136,40 @@ std::pair<std::string, std::vector<Token>> tokenize(const std::string& text, con
             continue;
         }
 
-        std::vector<std::string> chunks;
-        size_t pos2 = 0;
-        while (pos2 < w_lower.size()) {
-            int best_len = 0;
-            for (int len = (int)(w_lower.size() - pos2); len > 2; --len) {
-                if (vocab_to_idx.count(w_lower.substr(pos2, len))) {
-                    best_len = len;
-                    break;
+        int n_len = (int)w_lower.size();
+        std::vector<int> dp_cost(n_len + 1, INT_MAX);
+        std::vector<int> dp_prev(n_len + 1, -1);
+        std::vector<int> dp_len(n_len + 1, 0);
+        dp_cost[0] = 0;
+        
+        for (int i = 0; i < n_len; ++i) {
+            if (dp_cost[i] == INT_MAX) continue;
+            if (dp_cost[i + 1] > dp_cost[i] + 1) {
+                dp_cost[i + 1] = dp_cost[i] + 1;
+                dp_prev[i + 1] = i;
+                dp_len[i + 1] = 1;
+            }
+            int max_len = std::min(20, n_len - i);
+            for (int len = 3; len <= max_len; ++len) {
+                if (vocab_to_idx.count(w_lower.substr(i, len))) {
+                    if (dp_cost[i + len] > dp_cost[i] + 1) {
+                        dp_cost[i + len] = dp_cost[i] + 1;
+                        dp_prev[i + len] = i;
+                        dp_len[i + len] = len;
+                    }
                 }
             }
-            if (best_len > 0) {
-                chunks.push_back(w.substr(pos2, best_len));
-                pos2 += best_len;
-            } else {
-                chunks.push_back(w.substr(pos2, 1));
-                pos2 += 1;
-            }
         }
+        
+        std::vector<std::string> chunks;
+        int curr = n_len;
+        while (curr > 0) {
+            int prev_idx = dp_prev[curr];
+            int length = dp_len[curr];
+            chunks.push_back(w.substr(prev_idx, length));
+            curr = prev_idx;
+        }
+        std::reverse(chunks.begin(), chunks.end());
 
         std::vector<std::string> merged;
         std::string temp;

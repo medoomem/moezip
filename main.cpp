@@ -11,7 +11,7 @@
 #include <regex>
 #include <algorithm>
 #include <cstring>
-#include <cstdio>  // For std::fwrite
+#include <cstdio>
 
 #include "vocab.hpp"
 #include "tokenizer.hpp"
@@ -91,8 +91,9 @@ struct Args {
     std::string hex_data;
     std::string corpus;
     std::string vocab   = "words_final.txt";
-    std::string router  = "router_stateless_v4.json";
+    std::string router  = "router_stateless_v5_2nd_order.json";
     bool quiet = false;
+    bool verbose = false;
 };
 
 static void print_help(const char* prog) {
@@ -105,7 +106,8 @@ static void print_help(const char* prog) {
 "  train      (t)   Train the router matrix on a text corpus\n\n"
 "Options (all commands):\n"
 "  --vocab FILE     Vocabulary file (default: words_final.txt)\n"
-"  --router FILE    Router JSON state (default: router_stateless_v4.json)\n"
+"  --router FILE    Router JSON state (default: router_stateless_v5_2nd_order.json)\n"
+"  -v, --verbose    Show detailed routing stats for compression\n"
 "  -q, --quiet      Suppress informational output\n\n"
 "compress / decompress:\n"
 "  INPUT            File path or '-' for stdin\n"
@@ -144,6 +146,7 @@ static Args parse_args(int argc, char* argv[]) {
         else if ((a == "-o" || a == "--output") && i+1 < argc) { args.output = argv[++i]; }
         else if (a == "--corpus" && i+1 < argc) { args.corpus = argv[++i]; }
         else if (a == "-q" || a == "--quiet") { args.quiet = true; }
+        else if (a == "-v" || a == "--verbose") { args.verbose = true; }
         else if (a[0] != '-' || a == "-") {
             if (cmd == "hexdec") {
                 if (positional_count == 0) args.hex_data = a;
@@ -193,7 +196,7 @@ static void cmd_compress(const Args& args) {
     }
 
     auto packed = compress_adaptive_moe(text, vd.vocab_to_idx, matrix,
-                                        vd.expert_count, vd.expert_size);
+                                        vd.expert_count, vd.expert_size, args.verbose);
 
     size_t orig_bytes = text.size();
     size_t comp_bytes = packed.size();

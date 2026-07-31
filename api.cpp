@@ -21,7 +21,7 @@ extern "C" {
     EXPORT void init_engine(const char* vocab_path, const char* router_path) {
         if (!g_initialized) {
             std::string v_path = (vocab_path && vocab_path[0] != '\0') ? vocab_path : "words_final.txt";
-            std::string r_path = (router_path && router_path[0] != '\0') ? router_path : "router_stateless_v4.json";
+            std::string r_path = (router_path && router_path[0] != '\0') ? router_path : "router_stateless_v5_2nd_order.json";
             
             g_vd = load_and_partition_wordlist(v_path);
             g_matrix = load_router(r_path, g_vd.expert_count);
@@ -33,7 +33,7 @@ extern "C" {
         if (!g_initialized) init_engine(nullptr, nullptr);
 
         std::string input_str(text);
-        auto packed = compress_adaptive_moe(input_str, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size);
+        auto packed = compress_adaptive_moe(input_str, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size, false);
 
         if ((int)packed.size() > max_out_len) return -1;
         std::memcpy(out_buf, packed.data(), packed.size());

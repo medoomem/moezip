@@ -10,7 +10,7 @@ def get_chunked_cpp_array(name, content, delimiter):
     cpp_code = f"inline const char* const {name}_CHUNKS[] = {{\n"
     for chunk in chunks:
         cpp_code += f'    R"{delimiter}({chunk}){delimiter}",\n'
-    cpp_code += f"}};\n"
+    cpp_code += "};\n"
     cpp_code += f"inline const size_t {name}_CHUNKS_COUNT = {len(chunks)};\n"
     return cpp_code
 
@@ -21,27 +21,28 @@ if os.path.exists("words_final.txt"):
         vocab_content = f.read()
     print("Found 'words_final.txt'. Chunking and embedding it...")
 else:
-    vocab_content = "hello\\nthere\\n"
+    vocab_content = "hello\nthere\n"
     print("[INFO] words_final.txt not found. Using default fallback vocabulary.")
 
-# 2. Read and process router_stateless_v4.json
+# 2. Read and process router_stateless_v5_2nd_order.json
 router_content = ""
-if os.path.exists("router_stateless_v4.json"):
-    with open("router_stateless_v4.json", "r", encoding="utf-8") as f:
+
+if os.path.exists("router_stateless_v5_2nd_order.json"):
+    with open("router_stateless_v5_2nd_order.json", "r", encoding="utf-8") as f:
         router_content = f.read()
-    print("Found 'router_stateless_v4.json'. Chunking and embedding it...")
+    print("Found 'router_stateless_v5_2nd_order.json'. Chunking and embedding it...")
 else:
-    matrix_1s = [[1]*32 for _ in range(32)]
+    matrix_1s = [[[1]*32 for _ in range(32)] for _ in range(32)] # 3D fallback matrix
     router_content = json.dumps(matrix_1s)
-    print("[INFO] router_stateless_v4.json not found. Using default fallback router matrix.")
+    print("[INFO] router_stateless_v5_2nd_order.json not found. Using default fallback 3D router matrix.")
 
 # Generate chunked C++ array strings
 vocab_array_cpp = get_chunked_cpp_array("EMBEDDED_VOCAB", vocab_content, "EMBED_VOCAB")
 router_array_cpp = get_chunked_cpp_array("EMBEDDED_ROUTER", router_content, "EMBED_ROUTER")
 
-# Files map to generate
+# Files map to generate (using raw strings r"""...""" to preserve C++ escape sequences)
 files = {
-    "bindings.cpp": """#include <pybind11/pybind11.h>
+    "bindings.cpp": r"""#include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <iostream>
 #include <fstream>
@@ -58,7 +59,6 @@ static VocabData g_vd;
 static TransitionMatrix g_matrix;
 static bool g_initialized = false;
 
-// Helper RAII class to temporarily suppress std::cerr console messages
 struct SilenceStderr {
     std::streambuf* old_buf;
     std::stringstream null_buf;
@@ -68,7 +68,7 @@ struct SilenceStderr {
 
 static void py_init(const std::string& vocab_path = "", const std::string& router_path = "", bool quiet = true) {
     if (quiet) {
-        SilenceStderr silence; // Redirect std::cerr during asset loading
+        SilenceStderr silence; 
         g_vd = load_and_partition_wordlist(vocab_path);
         g_matrix = load_router(router_path, g_vd.expert_count);
     } else {
@@ -80,13 +80,13 @@ static void py_init(const std::string& vocab_path = "", const std::string& route
 
 static void ensure_initialized() {
     if (!g_initialized) {
-        py_init("", "", true); // Default quiet auto-initialization
+        py_init("", "", true); 
     }
 }
 
 static py::bytes py_compress(const std::string& text) {
     ensure_initialized();
-    auto packed = compress_adaptive_moe(text, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size);
+    auto packed = compress_adaptive_moe(text, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size, false);
     return py::bytes(reinterpret_cast<const char*>(packed.data()), packed.size());
 }
 
@@ -96,7 +96,7 @@ static std::string py_decompress(const std::string& packed_bytes) {
     return decompress_adaptive_moe(vec, g_vd.vocab, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size);
 }
 
-static void py_train(const std::string& corpus_or_path, const std::string& output_filepath = "router_stateless_v4.json", bool quiet = false) {
+static void py_train(const std::string& corpus_or_path, const std::string& output_filepath = "router_stateless_v5_2nd_order.json", bool quiet = false) {
     ensure_initialized();
 
     std::string corpus_text;
@@ -133,12 +133,13 @@ PYBIND11_MODULE(moezip, m) {
 
     m.def("train", &py_train, 
           py::arg("corpus_or_path"), 
-          py::arg("output_filepath") = "router_stateless_v4.json", 
+          py::arg("output_filepath") = "router_stateless_v5_2nd_order.json", 
           py::arg("quiet") = false,
           "Trains the router state matrix on a text string or corpus file.");
 }
 """,
-    "api.cpp": """#include "vocab.hpp"
+
+    "api.cpp": r"""#include "vocab.hpp"
 #include "codec.hpp"
 #include "router.hpp"
 #include <cstdint>
@@ -160,8 +161,8 @@ extern "C" {
 
     EXPORT void init_engine(const char* vocab_path, const char* router_path) {
         if (!g_initialized) {
-            std::string v_path = (vocab_path && vocab_path[0] != '\\0') ? vocab_path : "words_final.txt";
-            std::string r_path = (router_path && router_path[0] != '\\0') ? router_path : "router_stateless_v4.json";
+            std::string v_path = (vocab_path && vocab_path[0] != '\0') ? vocab_path : "words_final.txt";
+            std::string r_path = (router_path && router_path[0] != '\0') ? router_path : "router_stateless_v5_2nd_order.json";
             
             g_vd = load_and_partition_wordlist(v_path);
             g_matrix = load_router(r_path, g_vd.expert_count);
@@ -173,7 +174,7 @@ extern "C" {
         if (!g_initialized) init_engine(nullptr, nullptr);
 
         std::string input_str(text);
-        auto packed = compress_adaptive_moe(input_str, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size);
+        auto packed = compress_adaptive_moe(input_str, g_vd.vocab_to_idx, g_matrix, g_vd.expert_count, g_vd.expert_size, false);
 
         if ((int)packed.size() > max_out_len) return -1;
         std::memcpy(out_buf, packed.data(), packed.size());
@@ -188,20 +189,15 @@ extern "C" {
 
         if ((int)text.size() >= max_out_len) return -1;
         std::memcpy(out_buf, text.c_str(), text.size() + 1);
-        out_buf[text.size()] = '\\0';
+        out_buf[text.size()] = '\0';
         return (int)text.size();
     }
 }
 """,
-    "embedded_assets.hpp": f"""#pragma once
-#include <cstddef>
 
-{vocab_array_cpp}
+    "embedded_assets.hpp": f"#pragma once\n#include <cstddef>\n\n{vocab_array_cpp}\n{router_array_cpp}\n",
 
-{router_array_cpp}
-""",
-
-    "vocab.hpp": """#pragma once
+    "vocab.hpp": r"""#pragma once
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -216,7 +212,7 @@ struct VocabData {
 VocabData load_and_partition_wordlist(const std::string& filepath = "words_final.txt");
 """,
 
-    "vocab.cpp": """#include "vocab.hpp"
+    "vocab.cpp": r"""#include "vocab.hpp"
 #include "embedded_assets.hpp"
 #include <iostream>
 #include <fstream>
@@ -259,13 +255,13 @@ VocabData load_and_partition_wordlist(const std::string& filepath) {
 
     std::ifstream fin(filepath);
     if (!fin.is_open()) {
-        std::cerr << "'" << filepath << "' not found on disk. Loading embedded vocabulary chunks from binary...\\n";
+        std::cerr << "'" << filepath << "' not found on disk. Loading embedded vocabulary chunks from binary...\n";
         std::stringstream ssin;
         for (size_t i = 0; i < EMBEDDED_VOCAB_CHUNKS_COUNT; ++i) {
             ssin << EMBEDDED_VOCAB_CHUNKS[i];
         }
         while (std::getline(ssin, line)) {
-            while (!line.empty() && (line.back()=='\\r'||line.back()=='\\n'||line.back()==' '))
+            while (!line.empty() && (line.back()=='\r'||line.back()=='\n'||line.back()==' '))
                 line.pop_back();
             while (!line.empty() && (line.front()==' '))
                 line.erase(line.begin());
@@ -278,7 +274,7 @@ VocabData load_and_partition_wordlist(const std::string& filepath) {
         }
     } else {
         while (std::getline(fin, line)) {
-            while (!line.empty() && (line.back()=='\\r'||line.back()=='\\n'||line.back()==' '))
+            while (!line.empty() && (line.back()=='\r'||line.back()=='\n'||line.back()==' '))
                 line.pop_back();
             while (!line.empty() && (line.front()==' '))
                 line.erase(line.begin());
@@ -301,7 +297,7 @@ VocabData load_and_partition_wordlist(const std::string& filepath) {
     }
 
     int total_words = (int)raw_words.size();
-    std::cerr << "Loaded " << total_words << " unique tokens (including N-Grams).\\n";
+    std::cerr << "Loaded " << total_words << " unique tokens (including N-Grams).\n";
 
     std::unordered_set<std::string> priority_set;
     for (const auto& p : COMMON_PHRASES) priority_set.insert(p);
@@ -339,7 +335,7 @@ VocabData load_and_partition_wordlist(const std::string& filepath) {
     int expert_size = (total_words + expert_count - 1) / expert_count;
 
     std::cerr << "Experts: " << expert_count
-              << " | Capacity/Exp: " << expert_size << "\\n";
+              << " | Capacity/Exp: " << expert_size << "\n";
 
     int padded_size = expert_count * expert_size;
     std::vector<std::string> vocab_padded(padded_size);
@@ -362,7 +358,7 @@ VocabData load_and_partition_wordlist(const std::string& filepath) {
 }
 """,
 
-    "tokenizer.hpp": """#pragma once
+    "tokenizer.hpp": r"""#pragma once
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -381,10 +377,12 @@ std::string to_title(const std::string& s);
 bool is_all_nonword(const std::string& s);
 """,
 
-    "tokenizer.cpp": """#include "tokenizer.hpp"
+    "tokenizer.cpp": r"""#include "tokenizer.hpp"
 #include <regex>
 #include <algorithm>
 #include <cctype>
+#include <vector>
+#include <climits>
 
 std::string to_lower(const std::string& s) {
     std::string r = s;
@@ -415,8 +413,6 @@ std::string to_title(const std::string& s) {
     }
     return r;
 }
-
-// ... [Remainder of tokenizer.cpp remains unchanged] ...
 
 bool is_all_nonword(const std::string& s) {
     if (s.empty()) return false;
@@ -519,24 +515,40 @@ std::pair<std::string, std::vector<Token>> tokenize(const std::string& text, con
             continue;
         }
 
-        std::vector<std::string> chunks;
-        size_t pos2 = 0;
-        while (pos2 < w_lower.size()) {
-            int best_len = 0;
-            for (int len = (int)(w_lower.size() - pos2); len > 2; --len) {
-                if (vocab_to_idx.count(w_lower.substr(pos2, len))) {
-                    best_len = len;
-                    break;
+        int n_len = (int)w_lower.size();
+        std::vector<int> dp_cost(n_len + 1, INT_MAX);
+        std::vector<int> dp_prev(n_len + 1, -1);
+        std::vector<int> dp_len(n_len + 1, 0);
+        dp_cost[0] = 0;
+        
+        for (int i = 0; i < n_len; ++i) {
+            if (dp_cost[i] == INT_MAX) continue;
+            if (dp_cost[i + 1] > dp_cost[i] + 1) {
+                dp_cost[i + 1] = dp_cost[i] + 1;
+                dp_prev[i + 1] = i;
+                dp_len[i + 1] = 1;
+            }
+            int max_len = std::min(20, n_len - i);
+            for (int len = 3; len <= max_len; ++len) {
+                if (vocab_to_idx.count(w_lower.substr(i, len))) {
+                    if (dp_cost[i + len] > dp_cost[i] + 1) {
+                        dp_cost[i + len] = dp_cost[i] + 1;
+                        dp_prev[i + len] = i;
+                        dp_len[i + len] = len;
+                    }
                 }
             }
-            if (best_len > 0) {
-                chunks.push_back(w.substr(pos2, best_len));
-                pos2 += best_len;
-            } else {
-                chunks.push_back(w.substr(pos2, 1));
-                pos2 += 1;
-            }
         }
+        
+        std::vector<std::string> chunks;
+        int curr = n_len;
+        while (curr > 0) {
+            int prev_idx = dp_prev[curr];
+            int length = dp_len[curr];
+            chunks.push_back(w.substr(prev_idx, length));
+            curr = prev_idx;
+        }
+        std::reverse(chunks.begin(), chunks.end());
 
         std::vector<std::string> merged;
         std::string temp;
@@ -588,19 +600,23 @@ int get_actual_expert(const std::string& w, const std::unordered_map<std::string
 }
 """,
 
-    "ans.hpp": """#pragma once
+    "ans.hpp": r"""#pragma once
 #include <vector>
 #include <cstdint>
 #include <stdexcept>
 
 struct AdaptiveModel {
     std::vector<int> freqs;
-    std::vector<int> cumul;
+    std::vector<int> bit; // Fenwick Tree
+    int n;
     int total;
 
     explicit AdaptiveModel(int size);
     explicit AdaptiveModel(std::vector<int> init_freqs);
 
+    void _bit_add(int idx, int val);
+    int  _bit_sum(int idx) const;
+    
     void get_stats(int sym, int& out_cum, int& out_freq, int& out_total) const;
     void update(int sym);
     int find_symbol(int slot, int& out_cum, int& out_freq) const;
@@ -637,69 +653,90 @@ std::vector<uint8_t> encode_varint(uint64_t val);
 uint64_t decode_varint(const std::vector<uint8_t>& data, size_t& ptr);
 """,
 
-    "ans.cpp": """#include "ans.hpp"
+    "ans.cpp": r"""#include "ans.hpp"
 #include <algorithm>
 #include <stdexcept>
 
-// ─── AdaptiveModel ────────────────────────────────────────────────────────────
-
 AdaptiveModel::AdaptiveModel(int size) {
+    n = size;
     freqs.assign(size, 1);
+    bit.assign(n + 1, 0);
     total = size;
-    cumul.resize(size + 1);
-    for (int i = 0; i <= size; ++i) cumul[i] = i;
+    for (int i = 0; i < n; ++i) _bit_add(i, 1);
 }
 
-AdaptiveModel::AdaptiveModel(std::vector<int> init_freqs)
-    : freqs(std::move(init_freqs)) {
+AdaptiveModel::AdaptiveModel(std::vector<int> init_freqs) {
+    freqs = std::move(init_freqs);
+    n = freqs.size();
+    bit.assign(n + 1, 0);
     total = 0;
-    for (int f : freqs) total += f;
-    cumul.resize(freqs.size() + 1);
-    cumul[0] = 0;
-    for (size_t i = 0; i < freqs.size(); ++i)
-        cumul[i + 1] = cumul[i] + freqs[i];
+    for (int i = 0; i < n; ++i) {
+        total += freqs[i];
+        _bit_add(i, freqs[i]);
+    }
+}
+
+void AdaptiveModel::_bit_add(int idx, int val) {
+    idx += 1;
+    while (idx <= n) {
+        bit[idx] += val;
+        idx += idx & (-idx);
+    }
+}
+
+int AdaptiveModel::_bit_sum(int idx) const {
+    int res = 0;
+    while (idx > 0) {
+        res += bit[idx];
+        idx -= idx & (-idx);
+    }
+    return res;
 }
 
 void AdaptiveModel::get_stats(int sym, int& out_cum, int& out_freq, int& out_total) const {
-    out_cum   = cumul[sym];
-    out_freq  = freqs[sym];
+    out_cum = _bit_sum(sym);
+    out_freq = freqs[sym];
     out_total = total;
 }
 
 void AdaptiveModel::update(int sym) {
     freqs[sym]++;
     total++;
-    for (int i = sym + 1; i < (int)cumul.size(); ++i)
-        cumul[i]++;
+    _bit_add(sym, 1);
 
     if (total >= 16383) {
-        int cum = 0;
-        cumul[0] = 0;
-        for (size_t i = 0; i < freqs.size(); ++i) {
+        total = 0;
+        std::fill(bit.begin(), bit.end(), 0);
+        for (int i = 0; i < n; ++i) {
             freqs[i] = (freqs[i] >> 1) | 1;
-            cum += freqs[i];
-            cumul[i + 1] = cum;
+            total += freqs[i];
+            _bit_add(i, freqs[i]);
         }
-        total = cum;
     }
 }
 
 int AdaptiveModel::find_symbol(int slot, int& out_cum, int& out_freq) const {
-    int lo = 0, hi = (int)freqs.size() - 1;
-    while (lo < hi) {
-        int mid = (lo + hi) / 2;
-        if (cumul[mid + 1] <= slot) lo = mid + 1;
-        else hi = mid;
+    int idx = 0;
+    int bit_mask = 1;
+    while (bit_mask * 2 <= n) bit_mask *= 2;
+    
+    int curr_sum = 0;
+    while (bit_mask > 0) {
+        int next_idx = idx + bit_mask;
+        if (next_idx <= n && curr_sum + bit[next_idx] <= slot) {
+            idx = next_idx;
+            curr_sum += bit[next_idx];
+        }
+        bit_mask /= 2;
     }
-    if (cumul[lo] <= slot && slot < cumul[lo + 1]) {
-        out_cum  = cumul[lo];
-        out_freq = freqs[lo];
-        return lo;
+    
+    if (idx < n) {
+        out_cum = curr_sum;
+        out_freq = freqs[idx];
+        return idx;
     }
     throw std::runtime_error("ANS find_symbol: slot out of bounds");
 }
-
-// ─── ANSStream ────────────────────────────────────────────────────────────────
 
 void ANSStream::write_adaptive(AdaptiveModel& model, int sym) {
     ANSAction a;
@@ -718,11 +755,9 @@ void ANSStream::write_uniform(int val, int bits) {
     actions.push_back(a);
 }
 
-// ─── Zero-Overhead 32-Bit rANS ────────────────────────────────────────────────
-
 std::vector<uint8_t> ANSStream::finalize() {
     uint64_t X_MAX = 1ULL << 63;
-    uint64_t x = 1; // Start at 1 (Zero dummy bits) like BigInt
+    uint64_t x = 1; 
     std::vector<uint8_t> out;
 
     for (int k = (int)actions.size() - 1; k >= 0; --k) {
@@ -750,7 +785,6 @@ std::vector<uint8_t> ANSStream::finalize() {
         }
     }
 
-    // Exact variable length flush (removes 4 bytes of fixed padding)
     uint8_t x_bytes = 0;
     uint64_t temp = x;
     if (temp == 0) x_bytes = 1;
@@ -760,8 +794,7 @@ std::vector<uint8_t> ANSStream::finalize() {
         out.push_back((uint8_t)(x & 0xFF));
         x >>= 8;
     }
-    
-    out.push_back(x_bytes); // 1-byte length prefix to sync the hardware streams
+    out.push_back(x_bytes); 
 
     std::reverse(out.begin(), out.end());
     return out;
@@ -772,7 +805,6 @@ ANSDecoder::ANSDecoder(const std::vector<uint8_t>& payload) {
     ptr = 0;
     x = 0;
     
-    // Read precise variable state
     if (ptr < payload_data.size()) {
         uint8_t x_bytes = payload_data[ptr++];
         for (int i = 0; i < x_bytes; ++i) {
@@ -787,9 +819,7 @@ uint32_t ANSDecoder::read_word() {
     uint32_t w = 0;
     for (int i = 0; i < 4; ++i) {
         uint8_t byte = 0;
-        if (ptr < payload_data.size()) {
-            byte = payload_data[ptr++];
-        }
+        if (ptr < payload_data.size()) byte = payload_data[ptr++];
         w = (w << 8) | byte;
     }
     return w;
@@ -805,7 +835,7 @@ int ANSDecoder::read_adaptive(AdaptiveModel& model) {
 
     uint64_t L = 1ULL << 31;
     while (x < L) {
-        if (ptr >= payload_data.size()) break; // Safe break for zero-overhead EOF
+        if (ptr >= payload_data.size()) break; 
         x = (x << 32) | read_word();
     }
     return sym;
@@ -818,13 +848,11 @@ int ANSDecoder::read_uniform(int bits) {
 
     uint64_t L = 1ULL << 31;
     while (x < L) {
-        if (ptr >= payload_data.size()) break; // Safe break for zero-overhead EOF
+        if (ptr >= payload_data.size()) break;
         x = (x << 32) | read_word();
     }
     return val;
 }
-
-// ─── Number Encoding Helpers ──────────────────────────────────────────────────
 
 void get_number_parts(int val, int& out_bits, int& out_rem_bits, int& out_rem_val) {
     if (val == 0) { out_bits = 0; out_rem_bits = 0; out_rem_val = 0; return; }
@@ -858,7 +886,7 @@ std::vector<uint8_t> encode_varint(uint64_t val) {
 uint64_t decode_varint(const std::vector<uint8_t>& data, size_t& ptr) {
     uint64_t val = 0; int shift = 0;
     while (true) {
-        if (ptr >= data.size()) return val; // Safety bound
+        if (ptr >= data.size()) return val; 
         uint8_t b = data[ptr++];
         val |= ((uint64_t)(b & 0x7F)) << shift;
         if (!(b & 0x80)) break;
@@ -868,27 +896,28 @@ uint64_t decode_varint(const std::vector<uint8_t>& data, size_t& ptr) {
 }
 """,
 
-    "router.hpp": """#pragma once
+    "router.hpp": r"""#pragma once
 #include <vector>
 #include <string>
 #include <unordered_map>
 
-using TransitionMatrix = std::vector<std::vector<int>>;
+// 3D Matrix: [prev2][prev1][actual]
+using TransitionMatrix = std::vector<std::vector<std::vector<int>>>;
 
-int  predict_next_expert(int prev_expert, const TransitionMatrix& matrix);
-void update_transition_matrix(int prev_expert, int actual_expert, TransitionMatrix& matrix);
+int  predict_next_expert(int prev2, int prev1, const TransitionMatrix& matrix);
+void update_transition_matrix(int prev2, int prev1, int actual_expert, TransitionMatrix& matrix);
 
 TransitionMatrix train_router_on_corpus(
     const std::string& corpus_text,
     const std::unordered_map<std::string, int>& vocab_to_idx,
     int expert_count, int expert_size,
-    const std::string& output_filepath = "router_state.json");
+    const std::string& output_filepath = "router_stateless_v5_2nd_order.json");
 
 TransitionMatrix load_router(const std::string& filepath, int expert_count);
 void save_router(const TransitionMatrix& matrix, const std::string& filepath);
 """,
 
-    "router.cpp": """#include "router.hpp"
+    "router.cpp": r"""#include "router.hpp"
 #include "tokenizer.hpp"
 #include "embedded_assets.hpp"
 #include <fstream>
@@ -896,16 +925,22 @@ void save_router(const TransitionMatrix& matrix, const std::string& filepath);
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 
 static std::string matrix_to_json(const TransitionMatrix& m) {
     std::ostringstream oss;
     oss << "[";
-    for (size_t r = 0; r < m.size(); ++r) {
-        if (r > 0) oss << ",";
+    for (size_t i = 0; i < m.size(); ++i) {
+        if (i > 0) oss << ",";
         oss << "[";
-        for (size_t c = 0; c < m[r].size(); ++c) {
-            if (c > 0) oss << ",";
-            oss << m[r][c];
+        for (size_t j = 0; j < m[i].size(); ++j) {
+            if (j > 0) oss << ",";
+            oss << "[";
+            for (size_t k = 0; k < m[i][j].size(); ++k) {
+                if (k > 0) oss << ",";
+                oss << m[i][j][k];
+            }
+            oss << "]";
         }
         oss << "]";
     }
@@ -915,25 +950,25 @@ static std::string matrix_to_json(const TransitionMatrix& m) {
 
 static TransitionMatrix json_to_matrix(const std::string& json) {
     TransitionMatrix result;
+    std::vector<std::vector<int>> current_2d;
     std::vector<int> current_row;
-    bool in_inner = false;
+    int depth = 0;
     size_t i = 0;
     while (i < json.size()) {
         char c = json[i];
         if (c == '[') {
-            if (in_inner) {
-                current_row.clear();
-            } else {
-                in_inner = (i > 0 && json[i-1] != 0);
-            }
-            in_inner = true;
+            depth++;
+            if (depth == 3) current_row.clear();
             ++i;
         } else if (c == ']') {
-            if (!current_row.empty()) {
-                result.push_back(current_row);
+            if (depth == 3) {
+                current_2d.push_back(current_row);
                 current_row.clear();
-                in_inner = false;
+            } else if (depth == 2) {
+                result.push_back(current_2d);
+                current_2d.clear();
             }
+            depth--;
             ++i;
         } else if (std::isdigit((unsigned char)c) || (c == '-' && i + 1 < json.size() && std::isdigit((unsigned char)json[i+1]))) {
             size_t end = i;
@@ -948,22 +983,22 @@ static TransitionMatrix json_to_matrix(const std::string& json) {
     return result;
 }
 
-int predict_next_expert(int prev_expert, const TransitionMatrix& matrix) {
-    const auto& row = matrix[prev_expert];
+int predict_next_expert(int prev2, int prev1, const TransitionMatrix& matrix) {
+    const auto& row = matrix[prev2][prev1];
     int max_val = *std::max_element(row.begin(), row.end());
-    if (row[prev_expert] == max_val) return prev_expert;
+    if (row[prev1] == max_val) return prev1;
     for (int i = 0; i < (int)row.size(); ++i)
         if (row[i] == max_val) return i;
-    return prev_expert;
+    return prev1;
 }
 
-void update_transition_matrix(int prev_expert, int actual_expert, TransitionMatrix& matrix) {
-    auto& row = matrix[prev_expert];
+void update_transition_matrix(int prev2, int prev1, int actual_expert, TransitionMatrix& matrix) {
+    auto& row = matrix[prev2][prev1];
     row[actual_expert]++;
     int s = 0;
     for (int v : row) s += v;
-    if (s > 128) {
-        for (int& v : row) v = std::max(1, v / 2);
+    if (s > 1024) {
+        for (int& v : row) v = std::max(1, (int)(v * 0.9));
     }
 }
 
@@ -973,20 +1008,22 @@ TransitionMatrix train_router_on_corpus(
     int expert_count, int expert_size,
     const std::string& output_filepath) {
 
-    std::cout << "--- ROUTER TRAINING PHASE STARTED ---\\n";
-    TransitionMatrix matrix(expert_count, std::vector<int>(expert_count, 1));
-    int prev_expert = 0;
+    std::cout << "--- ROUTER TRAINING PHASE STARTED (2nd-Order Markov) ---\n";
+    TransitionMatrix matrix(expert_count, std::vector<std::vector<int>>(expert_count, std::vector<int>(expert_count, 1)));
+    int prev2_expert = 0;
+    int prev1_expert = 0;
 
     auto [lws, tokens] = tokenize(corpus_text, vocab_to_idx);
     for (const auto& [w, _] : tokens) {
         int actual = get_actual_expert(w, vocab_to_idx, expert_size);
-        update_transition_matrix(prev_expert, actual, matrix);
-        prev_expert = actual;
+        update_transition_matrix(prev2_expert, prev1_expert, actual, matrix);
+        prev2_expert = prev1_expert;
+        prev1_expert = actual;
     }
 
     save_router(matrix, output_filepath);
     std::cout << "Training completed. Saved pre-trained matrix to '"
-              << output_filepath << "'.\\n\\n";
+              << output_filepath << "'.\n\n";
     return matrix;
 }
 
@@ -1001,7 +1038,7 @@ TransitionMatrix load_router(const std::string& filepath, int expert_count) {
     std::ifstream fin(filepath);
     std::string content;
     if (!fin.is_open()) {
-        std::cerr << "[WARN] Router state '" << filepath << "' not found on disk. Loading embedded router state from memory.\\n";
+        std::cerr << "[WARN] Router state '" << filepath << "' not found on disk. Loading embedded router state from memory.\n";
         std::ostringstream oss;
         for (size_t i = 0; i < EMBEDDED_ROUTER_CHUNKS_COUNT; ++i) {
             oss << EMBEDDED_ROUTER_CHUNKS[i];
@@ -1016,7 +1053,7 @@ TransitionMatrix load_router(const std::string& filepath, int expert_count) {
 }
 """,
 
-    "codec.hpp": """#pragma once
+    "codec.hpp": r"""#pragma once
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -1039,7 +1076,7 @@ std::string decompress_adaptive_moe(
     bool verbose = false);
 """,
 
-    "codec.cpp": """#include "codec.hpp"
+    "codec.cpp": r"""#include "codec.hpp"
 #include "tokenizer.hpp"
 #include "ans.hpp"
 #include "router.hpp"
@@ -1048,9 +1085,10 @@ std::string decompress_adaptive_moe(
 #include <cstring>
 #include <optional>
 #include <deque>
+#include <cmath>
+#include <iostream>
 
 struct MatchResult { int dist; int length; };
-
 using LZCache = std::unordered_map<std::string, std::deque<int>>;
 
 static std::optional<MatchResult>
@@ -1133,7 +1171,7 @@ std::vector<uint8_t> compress_adaptive_moe(
     const std::unordered_map<std::string, int>& vocab_to_idx,
     const TransitionMatrix& initial_matrix,
     int expert_count, int expert_size,
-    bool /*verbose*/) {
+    bool verbose) {
 
     auto [leading_ws, tokens] = tokenize(text, vocab_to_idx);
     if (tokens.empty() && leading_ws.empty()) return {};
@@ -1151,10 +1189,13 @@ std::vector<uint8_t> compress_adaptive_moe(
 
     ANSStream stream;
     TransitionMatrix transition_matrix = initial_matrix;
-    int prev_expert = 0;
+    int prev2_expert = 0;
+    int prev1_expert = 0;
     int i = 0;
+    
+    int stats_hits = 0, stats_misses = 0, stats_raw = 0, stats_lz = 0;
 
-    LZCache lz_cache; // Declared locally for thread safety and auto-destruction
+    LZCache lz_cache; 
 
     while (i < (int)tokens.size()) {
         auto match = find_best_token_match(tokens, i, lz_cache);
@@ -1167,9 +1208,11 @@ std::vector<uint8_t> compress_adaptive_moe(
             for (int k = 0; k < length; ++k) {
                 const auto& [w_curr, _] = tokens[i + k];
                 int ae = get_actual_expert(w_curr, vocab_to_idx, expert_size);
-                update_transition_matrix(prev_expert, ae, transition_matrix);
-                prev_expert = ae;
+                update_transition_matrix(prev2_expert, prev1_expert, ae, transition_matrix);
+                prev2_expert = prev1_expert;
+                prev1_expert = ae;
             }
+            stats_lz += length;
             i += length;
             continue;
         }
@@ -1178,7 +1221,7 @@ std::vector<uint8_t> compress_adaptive_moe(
         std::string w_lower = to_lower(w);
         bool has_casing = (to_lower(w) != to_upper(w));
         int casing = get_casing(w);
-        int predicted_expert = predict_next_expert(prev_expert, transition_matrix);
+        int predicted_expert = predict_next_expert(prev2_expert, prev1_expert, transition_matrix);
 
         auto vit = vocab_to_idx.find(w_lower);
         if (vit != vocab_to_idx.end() && casing != -1) {
@@ -1190,15 +1233,18 @@ std::vector<uint8_t> compress_adaptive_moe(
                 stream.write_adaptive(tag_model, 0);
                 write_number(stream, local_idx, local_idx_bits);
                 if (has_casing) stream.write_adaptive(casing_model, casing);
+                stats_hits++;
             } else {
                 stream.write_adaptive(tag_model, 1);
                 stream.write_adaptive(expert_model, actual_expert);
                 write_number(stream, local_idx, local_idx_bits);
                 if (has_casing) stream.write_adaptive(casing_model, casing);
+                stats_misses++;
             }
 
-            update_transition_matrix(prev_expert, actual_expert, transition_matrix);
-            prev_expert = actual_expert;
+            update_transition_matrix(prev2_expert, prev1_expert, actual_expert, transition_matrix);
+            prev2_expert = prev1_expert;
+            prev1_expert = actual_expert;
             write_spacing(stream, spacing, spacing_model, char_len_bits, char_model);
             ++i;
             continue;
@@ -1210,10 +1256,21 @@ std::vector<uint8_t> compress_adaptive_moe(
         for (size_t b = 0; b < w.size(); ++b)
             stream.write_adaptive(char_model, wb[b]);
 
-        update_transition_matrix(prev_expert, 31, transition_matrix);
-        prev_expert = 31;
+        update_transition_matrix(prev2_expert, prev1_expert, 31, transition_matrix);
+        prev2_expert = prev1_expert;
+        prev1_expert = 31;
         write_spacing(stream, spacing, spacing_model, char_len_bits, char_model);
+        stats_raw++;
         ++i;
+    }
+
+    if (verbose) {
+        double bits_per_expert = std::log2(expert_count);
+        std::cout << "\n  [Routing Stats]\n";
+        std::cout << "  Hits (Tag 0)      : " << stats_hits << "  (Gave/Saved ~" << stats_hits * bits_per_expert << " bits)\n";
+        std::cout << "  Misses (Tag 1)    : " << stats_misses << "  (Took/Cost  ~" << stats_misses * bits_per_expert << " bits)\n";
+        std::cout << "  Raw Fallback (T2) : " << stats_raw << "\n";
+        std::cout << "  LZ Copied (Tag 3) : " << stats_lz << " tokens\n";
     }
 
     std::vector<uint8_t> ans_payload = stream.finalize();
@@ -1258,19 +1315,18 @@ std::string decompress_adaptive_moe(
     AdaptiveModel char_model(256);
 
     AdaptiveModel local_idx_bits({1,1,2,4,8,16,32,64,128,64,32,16,8,4,2,1});
-    // Must mirror compress_adaptive_moe exactly -- same model sizes in the
-    // same order -- or the adaptive state will desync and decoding breaks.
     AdaptiveModel dist_bits(32);
     AdaptiveModel len_bits(32);
     AdaptiveModel char_len_bits({1,2,4,8,16,32,64,32,16,8,4,2,1,1,1,1});
 
     TransitionMatrix transition_matrix = initial_matrix;
-    int prev_expert = 0;
+    int prev2_expert = 0;
+    int prev1_expert = 0;
     std::vector<Token> decoded_tokens;
     decoded_tokens.reserve(word_count);
 
     while ((int)decoded_tokens.size() < word_count) {
-        int predicted_expert = predict_next_expert(prev_expert, transition_matrix);
+        int predicted_expert = predict_next_expert(prev2_expert, prev1_expert, transition_matrix);
         int tag = stream.read_adaptive(tag_model);
 
         if (tag == 0) {
@@ -1288,8 +1344,9 @@ std::string decompress_adaptive_moe(
 
             std::string spacing = read_spacing(stream, spacing_model,
                                                char_len_bits, char_model);
-            update_transition_matrix(prev_expert, predicted_expert, transition_matrix);
-            prev_expert = predicted_expert;
+            update_transition_matrix(prev2_expert, prev1_expert, predicted_expert, transition_matrix);
+            prev2_expert = prev1_expert;
+            prev1_expert = predicted_expert;
             decoded_tokens.push_back({word, spacing});
 
         } else if (tag == 1) {
@@ -1308,8 +1365,9 @@ std::string decompress_adaptive_moe(
 
             std::string spacing = read_spacing(stream, spacing_model,
                                                char_len_bits, char_model);
-            update_transition_matrix(prev_expert, actual_expert, transition_matrix);
-            prev_expert = actual_expert;
+            update_transition_matrix(prev2_expert, prev1_expert, actual_expert, transition_matrix);
+            prev2_expert = prev1_expert;
+            prev1_expert = actual_expert;
             decoded_tokens.push_back({word, spacing});
 
         } else if (tag == 2) {
@@ -1320,8 +1378,9 @@ std::string decompress_adaptive_moe(
             std::string word(reinterpret_cast<const char*>(bts.data()), length);
             std::string spacing = read_spacing(stream, spacing_model,
                                                char_len_bits, char_model);
-            update_transition_matrix(prev_expert, 31, transition_matrix);
-            prev_expert = 31;
+            update_transition_matrix(prev2_expert, prev1_expert, 31, transition_matrix);
+            prev2_expert = prev1_expert;
+            prev1_expert = 31;
             decoded_tokens.push_back({word, spacing});
 
         } else if (tag == 3) {
@@ -1332,8 +1391,9 @@ std::string decompress_adaptive_moe(
             for (int k = 0; k < length; ++k) {
                 const Token& copied = decoded_tokens[start_idx + k];
                 int ae = get_actual_expert(copied.first, vocab_to_idx, expert_size);
-                update_transition_matrix(prev_expert, ae, transition_matrix);
-                prev_expert = ae;
+                update_transition_matrix(prev2_expert, prev1_expert, ae, transition_matrix);
+                prev2_expert = prev1_expert;
+                prev1_expert = ae;
                 decoded_tokens.push_back(copied);
             }
         }
@@ -1343,7 +1403,7 @@ std::string decompress_adaptive_moe(
 }
 """,
 
-    "main.cpp": """#ifdef _WIN32
+    "main.cpp": r"""#ifdef _WIN32
 #include <io.h>
 #include <fcntl.h>
 #endif
@@ -1356,7 +1416,7 @@ std::string decompress_adaptive_moe(
 #include <regex>
 #include <algorithm>
 #include <cstring>
-#include <cstdio>  // For std::fwrite
+#include <cstdio>
 
 #include "vocab.hpp"
 #include "tokenizer.hpp"
@@ -1407,7 +1467,7 @@ static std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
 
 static bool looks_like_hex(const std::vector<uint8_t>& raw) {
     for (uint8_t b : raw) {
-        if (!std::isxdigit((unsigned char)b) && b != ' ' && b != '\\n' && b != '\\r' && b != '\\t')
+        if (!std::isxdigit((unsigned char)b) && b != ' ' && b != '\n' && b != '\r' && b != '\t')
             return false;
     }
     return true;
@@ -1436,36 +1496,38 @@ struct Args {
     std::string hex_data;
     std::string corpus;
     std::string vocab   = "words_final.txt";
-    std::string router  = "router_stateless_v4.json";
+    std::string router  = "router_stateless_v5_2nd_order.json";
     bool quiet = false;
+    bool verbose = false;
 };
 
 static void print_help(const char* prog) {
     std::cout <<
-"Usage: " << prog << " COMMAND [options]\\n\\n"
-"Commands:\\n"
-"  compress   (c)   Compress a text file or string\\n"
-"  decompress (d)   Decompress a .moe binary file\\n"
-"  hexdec     (hd)  Decompress from a hex string on the command line\\n"
-"  train      (t)   Train the router matrix on a text corpus\\n\\n"
-"Options (all commands):\\n"
-"  --vocab FILE     Vocabulary file (default: words_final.txt)\\n"
-"  --router FILE    Router JSON state (default: router_stateless_v4.json)\\n"
-"  -q, --quiet      Suppress informational output\\n\\n"
-"compress / decompress:\\n"
-"  INPUT            File path or '-' for stdin\\n"
-"  -o, --output     Output path or '-' for stdout\\n\\n"
-"hexdec:\\n"
-"  HEX              Hex-encoded compressed data\\n"
-"  -o, --output     Output path or '-' for stdout (default: stdout)\\n\\n"
-"train:\\n"
-"  --corpus FILE    Training corpus text file\\n\\n"
-"Examples:\\n"
-"  moezip compress myfile.txt -o myfile.moe\\n"
-"  moezip decompress myfile.moe -o myfile.txt\\n"
-"  moezip decompress myfile.moe -o -\\n"
-"  moezip hexdec AABBCC... -o result.txt\\n"
-"  moezip train --corpus corpus.txt\\n";
+"Usage: " << prog << " COMMAND [options]\n\n"
+"Commands:\n"
+"  compress   (c)   Compress a text file or string\n"
+"  decompress (d)   Decompress a .moe binary file\n"
+"  hexdec     (hd)  Decompress from a hex string on the command line\n"
+"  train      (t)   Train the router matrix on a text corpus\n\n"
+"Options (all commands):\n"
+"  --vocab FILE     Vocabulary file (default: words_final.txt)\n"
+"  --router FILE    Router JSON state (default: router_stateless_v5_2nd_order.json)\n"
+"  -v, --verbose    Show detailed routing stats for compression\n"
+"  -q, --quiet      Suppress informational output\n\n"
+"compress / decompress:\n"
+"  INPUT            File path or '-' for stdin\n"
+"  -o, --output     Output path or '-' for stdout\n\n"
+"hexdec:\n"
+"  HEX              Hex-encoded compressed data\n"
+"  -o, --output     Output path or '-' for stdout (default: stdout)\n\n"
+"train:\n"
+"  --corpus FILE    Training corpus text file\n\n"
+"Examples:\n"
+"  moezip compress myfile.txt -o myfile.moe\n"
+"  moezip decompress myfile.moe -o myfile.txt\n"
+"  moezip decompress myfile.moe -o -\n"
+"  moezip hexdec AABBCC... -o result.txt\n"
+"  moezip train --corpus corpus.txt\n";
 }
 
 static Args parse_args(int argc, char* argv[]) {
@@ -1489,6 +1551,7 @@ static Args parse_args(int argc, char* argv[]) {
         else if ((a == "-o" || a == "--output") && i+1 < argc) { args.output = argv[++i]; }
         else if (a == "--corpus" && i+1 < argc) { args.corpus = argv[++i]; }
         else if (a == "-q" || a == "--quiet") { args.quiet = true; }
+        else if (a == "-v" || a == "--verbose") { args.verbose = true; }
         else if (a[0] != '-' || a == "-") {
             if (cmd == "hexdec") {
                 if (positional_count == 0) args.hex_data = a;
@@ -1497,7 +1560,7 @@ static Args parse_args(int argc, char* argv[]) {
             }
             ++positional_count;
         } else {
-            std::cerr << "[WARN] Unknown option: " << a << "\\n";
+            std::cerr << "[WARN] Unknown option: " << a << "\n";
         }
     }
 
@@ -1513,14 +1576,14 @@ static Args parse_args(int argc, char* argv[]) {
 static void cmd_train(const Args& args) {
     auto vd = load_and_partition_wordlist(resolve(args.vocab));
     if (!fs::exists(args.corpus)) {
-        std::cerr << "[ERROR] Corpus file not found: " << args.corpus << "\\n";
+        std::cerr << "[ERROR] Corpus file not found: " << args.corpus << "\n";
         std::exit(1);
     }
     std::string corpus_text = read_text_file(args.corpus);
     std::string out_matrix  = resolve(args.router, true);
     train_router_on_corpus(corpus_text, vd.vocab_to_idx,
                            vd.expert_count, vd.expert_size, out_matrix);
-    std::cout << "Router matrix saved to: " << out_matrix << "\\n";
+    std::cout << "Router matrix saved to: " << out_matrix << "\n";
 }
 
 static void cmd_compress(const Args& args) {
@@ -1538,7 +1601,7 @@ static void cmd_compress(const Args& args) {
     }
 
     auto packed = compress_adaptive_moe(text, vd.vocab_to_idx, matrix,
-                                        vd.expert_count, vd.expert_size);
+                                        vd.expert_count, vd.expert_size, args.verbose);
 
     size_t orig_bytes = text.size();
     size_t comp_bytes = packed.size();
@@ -1553,20 +1616,20 @@ static void cmd_compress(const Args& args) {
         }
         std::ofstream fout(out_path, std::ios::binary);
         if (!fout.is_open()) {
-            std::cerr << "[ERROR] Cannot write to: " << out_path << "\\n";
+            std::cerr << "[ERROR] Cannot write to: " << out_path << "\n";
             std::exit(1);
         }
         fout.write(reinterpret_cast<const char*>(packed.data()), packed.size());
         if (!args.quiet) {
-            std::cout << "Compressed  : " << args.input << "\\n";
-            std::cout << "Output      : " << out_path  << "\\n";
+            std::cout << "Compressed  : " << args.input << "\n";
+            std::cout << "Output      : " << out_path  << "\n";
         }
     }
 
     if (!args.quiet) {
-        std::cerr << "Original    : " << orig_bytes << " bytes\\n";
-        std::cerr << "Compressed  : " << comp_bytes << " bytes\\n";
-        std::cerr << "Ratio       : " << ratio      << "%\\n";
+        std::cerr << "Original    : " << orig_bytes << " bytes\n";
+        std::cerr << "Compressed  : " << comp_bytes << " bytes\n";
+        std::cerr << "Ratio       : " << ratio      << "%\n";
     }
 }
 
@@ -1580,7 +1643,7 @@ static void cmd_decompress(const Args& args) {
                                     std::istreambuf_iterator<char>());
     } else {
         if (!fs::exists(args.input)) {
-            std::cerr << "[ERROR] Input file not found: " << args.input << "\\n";
+            std::cerr << "[ERROR] Input file not found: " << args.input << "\n";
             std::exit(1);
         }
         raw = read_binary_file(args.input);
@@ -1610,13 +1673,13 @@ static void cmd_decompress(const Args& args) {
         }
         std::ofstream fout(out_path, std::ios::binary);
         if (!fout.is_open()) {
-            std::cerr << "[ERROR] Cannot write to: " << out_path << "\\n";
+            std::cerr << "[ERROR] Cannot write to: " << out_path << "\n";
             std::exit(1);
         }
         fout << text;
         if (!args.quiet) {
-            std::cout << "Decompressed: " << args.input << "\\n";
-            std::cout << "Output      : " << out_path  << "\\n";
+            std::cout << "Decompressed: " << args.input << "\n";
+            std::cout << "Output      : " << out_path  << "\n";
         }
     }
 }
@@ -1635,7 +1698,7 @@ static void cmd_hexdec(const Args& args) {
         std::ofstream fout(args.output);
         fout << text;
         if (!args.quiet)
-            std::cout << "Output written to: " << args.output << "\\n";
+            std::cout << "Output written to: " << args.output << "\n";
     }
 }
 
@@ -1654,14 +1717,14 @@ int main(int argc, char* argv[]) {
         else { print_help(argv[0]); return 1; }
 
     } catch (const std::exception& ex) {
-        std::cerr << "[FATAL] " << ex.what() << "\\n";
+        std::cerr << "[FATAL] " << ex.what() << "\n";
         return 1;
     }
     return 0;
 }
 """,
 
-    "CMakeLists.txt": """cmake_minimum_required(VERSION 3.16)
+    "CMakeLists.txt": r"""cmake_minimum_required(VERSION 3.16)
 project(moezip CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -1695,7 +1758,6 @@ if(pybind11_FOUND)
     pybind11_add_module(moezip_py bindings.cpp vocab.cpp tokenizer.cpp ans.cpp router.cpp codec.cpp)
     target_include_directories(moezip_py PRIVATE ${CMAKE_SOURCE_DIR})
     
-    # Set platform-correct extension (.pyd for Windows, .so for Linux/macOS)
     if(WIN32)
         set_target_properties(moezip_py PROPERTIES OUTPUT_NAME "moezip" PREFIX "" SUFFIX ".pyd")
     else()
@@ -1716,4 +1778,4 @@ for filename, content in files.items():
         f.write(content)
     print(f"Created: {filename}")
 
-print("\\nSuccessfully updated project files. You can now compile a completely self-contained C++ executable.")
+print("\nSuccessfully updated project files. You can now compile a completely self-contained C++ executable.")
