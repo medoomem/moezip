@@ -120,6 +120,10 @@ std::vector<uint8_t> compress_adaptive_moe(
     LZCache lz_cache; 
 
     while (i < (int)tokens.size()) {
+        // Prevent heap fragmentation on massive files
+        if (lz_cache.size() > 50000) {
+            lz_cache.clear();
+        }
         auto match = find_best_token_match(tokens, i, lz_cache);
         if (match) {
             int dist = match->dist, length = match->length;

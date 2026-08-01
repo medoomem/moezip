@@ -194,7 +194,13 @@ std::pair<std::string, std::vector<Token>> tokenize(const std::string& text, con
 }
 
 std::string detokenize(const std::string& leading_ws, const std::vector<Token>& tokens) {
-    std::string result = leading_ws;
+    size_t total_len = leading_ws.size();
+    for (const auto& [tok, sp] : tokens) {
+        total_len += tok.size() + sp.size();
+    }
+    std::string result;
+    result.reserve(total_len + 16); // PRE-ALLOCATE EXACT MEMORY BLOCK
+    result += leading_ws;
     for (const auto& [tok, sp] : tokens) {
         result += tok;
         result += sp;

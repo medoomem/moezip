@@ -145,15 +145,16 @@ std::vector<uint8_t> ANSStream::finalize() {
     return out;
 }
 
+// ZERO-COPY ANS DECODER IMPLEMENTATION
 ANSDecoder::ANSDecoder(const std::vector<uint8_t>& payload) {
-    payload_data = payload;
+    payload_ref = &payload;
     ptr = 0;
     x = 0;
     
-    if (ptr < payload_data.size()) {
-        uint8_t x_bytes = payload_data[ptr++];
+    if (ptr < payload_ref->size()) {
+        uint8_t x_bytes = (*payload_ref)[ptr++];
         for (int i = 0; i < x_bytes; ++i) {
-            x = (x << 8) | (ptr < payload_data.size() ? payload_data[ptr++] : 0);
+            x = (x << 8) | (ptr < payload_ref->size() ? (*payload_ref)[ptr++] : 0);
         }
     } else {
         x = 1; 
@@ -164,7 +165,7 @@ uint32_t ANSDecoder::read_word() {
     uint32_t w = 0;
     for (int i = 0; i < 4; ++i) {
         uint8_t byte = 0;
-        if (ptr < payload_data.size()) byte = payload_data[ptr++];
+        if (ptr < payload_ref->size()) byte = (*payload_ref)[ptr++];
         w = (w << 8) | byte;
     }
     return w;
@@ -180,7 +181,7 @@ int ANSDecoder::read_adaptive(AdaptiveModel& model) {
 
     uint64_t L = 1ULL << 31;
     while (x < L) {
-        if (ptr >= payload_data.size()) break; 
+        if (ptr >= payload_ref->size()) break; 
         x = (x << 32) | read_word();
     }
     return sym;
@@ -193,7 +194,7 @@ int ANSDecoder::read_uniform(int bits) {
 
     uint64_t L = 1ULL << 31;
     while (x < L) {
-        if (ptr >= payload_data.size()) break;
+        if (ptr >= payload_ref->size()) break;
         x = (x << 32) | read_word();
     }
     return val;

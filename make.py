@@ -573,7 +573,13 @@ std::pair<std::string, std::vector<Token>> tokenize(const std::string& text, con
 }
 
 std::string detokenize(const std::string& leading_ws, const std::vector<Token>& tokens) {
-    std::string result = leading_ws;
+    size_t total_len = leading_ws.size();
+    for (const auto& [tok, sp] : tokens) {
+        total_len += tok.size() + sp.size();
+    }
+    std::string result;
+    result.reserve(total_len + 16); // PRE-ALLOCATE EXACT MEMORY BLOCK
+    result += leading_ws;
     for (const auto& [tok, sp] : tokens) {
         result += tok;
         result += sp;
@@ -637,7 +643,7 @@ struct ANSStream {
 
 struct ANSDecoder {
     uint64_t x;
-    std::vector<uint8_t> payload_data;
+    const std::vector<uint8_t>* payload_ref; // ZERO-COPY POINTER
     size_t ptr;
 
     explicit ANSDecoder(const std::vector<uint8_t>& payload);
@@ -800,15 +806,16 @@ std::vector<uint8_t> ANSStream::finalize() {
     return out;
 }
 
+// ZERO-COPY ANS DECODER IMPLEMENTATION
 ANSDecoder::ANSDecoder(const std::vector<uint8_t>& payload) {
-    payload_data = payload;
+    payload_ref = &payload;
     ptr = 0;
     x = 0;
     
-    if (ptr < payload_data.size()) {
-        uint8_t x_bytes = payload_data[ptr++];
+    if (ptr < payload_ref->size()) {
+        uint8_t x_bytes = (*payload_ref)[ptr++];
         for (int i = 0; i < x_bytes; ++i) {
-            x = (x << 8) | (ptr < payload_data.size() ? payload_data[ptr++] : 0);
+            x = (x << 8) | (ptr < payload_ref->size() ? (*payload_ref)[ptr++] : 0);
         }
     } else {
         x = 1; 
@@ -819,7 +826,7 @@ uint32_t ANSDecoder::read_word() {
     uint32_t w = 0;
     for (int i = 0; i < 4; ++i) {
         uint8_t byte = 0;
-        if (ptr < payload_data.size()) byte = payload_data[ptr++];
+        if (ptr < payload_ref->size()) byte = (*payload_ref)[ptr++];
         w = (w << 8) | byte;
     }
     return w;
@@ -835,7 +842,7 @@ int ANSDecoder::read_adaptive(AdaptiveModel& model) {
 
     uint64_t L = 1ULL << 31;
     while (x < L) {
-        if (ptr >= payload_data.size()) break; 
+        if (ptr >= payload_ref->size()) break; 
         x = (x << 32) | read_word();
     }
     return sym;
@@ -848,7 +855,7 @@ int ANSDecoder::read_uniform(int bits) {
 
     uint64_t L = 1ULL << 31;
     while (x < L) {
-        if (ptr >= payload_data.size()) break;
+        if (ptr >= payload_ref->size()) break;
         x = (x << 32) | read_word();
     }
     return val;
@@ -1198,6 +1205,10 @@ std::vector<uint8_t> compress_adaptive_moe(
     LZCache lz_cache; 
 
     while (i < (int)tokens.size()) {
+        // Prevent heap fragmentation on massive files
+        if (lz_cache.size() > 50000) {
+            lz_cache.clear();
+        }
         auto match = find_best_token_match(tokens, i, lz_cache);
         if (match) {
             int dist = match->dist, length = match->length;

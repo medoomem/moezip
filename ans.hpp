@@ -35,7 +35,7 @@ struct ANSStream {
 
 struct ANSDecoder {
     uint64_t x;
-    std::vector<uint8_t> payload_data;
+    const std::vector<uint8_t>* payload_ref; // ZERO-COPY POINTER
     size_t ptr;
 
     explicit ANSDecoder(const std::vector<uint8_t>& payload);
